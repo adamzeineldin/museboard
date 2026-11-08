@@ -5,7 +5,7 @@ describe("isProtectedPath", () => {
   it.each(["/jobs", "/jobs/abc", "/campaign", "/activity", "/warm-paths", "/settings", "/onboarding"])("protects %s", (p) => {
     expect(isProtectedPath(p)).toBe(true);
   });
-  it.each(["/", "/signin", "/signin/check-email", "/api/auth/session", "/mcp", "/jobsearch"])("leaves %s public", (p) => {
+  it.each(["/", "/signin", "/signin/check-email", "/api/auth/session", "/mcp", "/.well-known/oauth-protected-resource", "/jobsearch"])("leaves %s public", (p) => {
     expect(isProtectedPath(p)).toBe(false);
   });
 });

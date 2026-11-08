@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ConnectMuseSection } from "@/components/connector/ConnectMuseSection";
 import { formatRelative } from "@/components/shell/format";
 import { ResumeList } from "@/components/resume/ResumeList";
 import { ResumeUploadForm } from "@/components/resume/ResumeUploadForm";
@@ -17,7 +18,7 @@ async function signOutAction(): Promise<void> {
 
 const wordCount = (text: string): number => (text.trim() ? text.trim().split(/\s+/).length : 0);
 
-// Profile, resumes and sign out. Milestone 7 adds the Muse connector section.
+// Profile, resumes, the Muse connector (milestone 7) and sign out.
 export default async function SettingsPage() {
   const user = await requireUser();
   const resumes = await listResumes(user.id);
@@ -57,6 +58,8 @@ export default async function SettingsPage() {
         )}
         <ResumeUploadForm action={uploadResumeAction} submitLabel={items.length ? "Upload another" : "Upload resume"} />
       </Panel>
+
+      <ConnectMuseSection userId={user.id} />
 
       <Panel aria-labelledby="profile-title">
         <h2 id="profile-title" className="label">
