@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defineConfig } from "vitest/config";
-import { TEST_DATABASE_URL } from "./src/test/constants.ts";
+import { TEST_DATABASE_URL, TEST_MAIL_DIR } from "./src/test/constants.ts";
 
 export default defineConfig({
   resolve: {
@@ -13,16 +13,16 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "worker/**/*.test.ts", "prisma/**/*.test.ts"],
     globalSetup: ["src/test/global-setup.ts"],
-    // Tests share one SQLite file, so run test files one at a time.
+    // Test files in one run share one SQLite file (per run, see src/test/constants.ts), so run them one at a time.
     fileParallelism: false,
     env: {
       DATABASE_URL: TEST_DATABASE_URL,
-      DEV_MAIL_DIR: path.resolve(import.meta.dirname, ".test-db", "mail"),
+      DEV_MAIL_DIR: TEST_MAIL_DIR,
     },
     coverage: {
       provider: "v8",
-      include: ["src/lib/**/*.ts", "src/components/**/*.ts", "worker/**/*.ts"],
-      exclude: ["**/*.test.ts", "src/generated/**", "src/test/**"],
+      include: ["src/lib/**/*.ts", "src/components/**/*.ts", "src/app/**/*.ts", "worker/**/*.ts"],
+      exclude: ["**/*.test.ts", "src/generated/**", "src/test/**", "**/testing/**", "**/__fixtures__/**"],
     },
   },
 });

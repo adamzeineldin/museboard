@@ -40,6 +40,9 @@ e2e/                        Playwright happy path (milestone 8)
 - Outreach is never sent by Inroad. No feature offers rewards for referrals. Nothing scrapes social media,
   LinkedIn, Meta Careers or Google Careers. Job data comes only from Greenhouse, Lever, Ashby and Workday public job-board APIs.
 - Companies with no public ATS feed (e.g. Meta, Google in the seed) have `ats = null` and are never scraped.
+- Prototype classes in `src/app/styles/components.css` must not share a name with a Tailwind utility: utilities win, and
+  Tailwind generates one whenever the name appears in markup (the prototype's `.ring` became `.match-ring`, `.inline`
+  became `.inline-fields`). Prototype classes reused with different meanings are scoped (the campaign toggle is `.opts .co`).
 
 ## Schema additions beyond the brief (and why)
 - `Job.description String?`, `Job.compensation String?`, `Job.department String?` — scoring uses title + description; cards show pay.
@@ -111,6 +114,35 @@ buildReferralPacket(userId, jobId | null, contactId): Promise<ReferralPacket>
 getDefaultResume(userId): Promise<Resume|null>;  resumeDownloadPath(resumeId) => `/api/resumes/${id}` (auth-checked route)
 ```
 
+### Contract additions recorded at the milestone 4-6 integration
+Optional trailing parameters are additive; existing callers keep working.
+```ts
+// src/lib/campaign
+loadRuleCampaign(userId, timeZone, client?): Promise<{ ruleCampaign: RuleCampaign|null, versionInForce, rules }>
+  // rule-engine view of the user's NEWEST campaign whatever its status (revoked reads "Campaign is paused").
+  // The Jobs feed loads it once per request and runs checkApplication per job; it must stay equal to evaluateJobForUser.
+proposeVersion(userId, rules, via, now?)   approveVersion(userId, versionId, via, now?)
+getCampaignHistory(userId); versionProposedBy(userId, versionId); rulesEqual(a, b); summarizeRuleParts(rules, ctx)
+CampaignError (code + user-safe message)
+// src/lib/applications
+getSubmissionPacket(userId, applicationId, now?, actor: Actor = 'inroad')   // audits application.packet_requested
+runWeeklyPass(...) => { submitted, waiting, referralDrafts, reason?, failed? }   // `submitted` = cleared to submit (prepared)
+getActivity(userId, timeZone, now?); ApplicationError (code + user-safe message)
+// src/lib/matching
+recomputeMatches(userId, deps?: { embedder? })
+// src/lib/outreach
+draftOutreach(userId, contactId, kind, jobId?, actor: Actor = 'user')
+createReferralAskDraft(userId, contactId, jobId?, actor: Actor = 'inroad')   // idempotent per (contact, job, referral_ask)
+```
+- A new campaign is created with status `paused`; its first approval sets it to `active`. `getCampaignState` only returns an
+  active or paused campaign (null after a revoke).
+- Extra application reason `Upload a resume first`: `Application.resumeId` is required (brief sec. 3), so preparing a job for a
+  user with no resume creates **no** Application. `prepareApplication` throws `ApplicationError('no_resume')` and audits
+  `application.blocked` with `{ ok: false, reason }`; `runWeeklyPass` returns `reason: 'Upload a resume first'`. This keeps
+  ground rule 6 (the attempt is logged) without allowing an application row that has no resume to go out.
+- Resumes used by the approved or pending campaign version, or by any Application, cannot be deleted (`Application.resumeId`
+  is `onDelete: Restrict`).
+
 ## Packets (src/lib/packet-types.ts, pure types + zod, owned by milestone 5)
 ```ts
 ReferralPacket  = { role: { jobId, title, company, url } | null, fitSummary: string[3], resume: { id, filename, downloadPath } | null }
@@ -124,4 +156,4 @@ company in `autoCompanies` or `askFirstCompanies`, type in `roles`, score >= `mi
 `prepareApplication`: ok -> `prepared`; failure (top choice, weekly limit) -> `waiting` with the reason; top choice also
 creates a `referral_ask` draft for `bestContactAt` (if any, and no draft already exists for that contact+job).
 Jobs outside the campaign are not turned into applications by the pass; the Jobs feed still shows their held reason
-from `evaluateJobForUser`. A user clicking **Prepare** on any job always creates an Application (prepared or waiting).
+from `evaluateJobForUser`. A user clicking **Prepare** on any open job always creates an Application (prepared or waiting), provided they have a resume.
