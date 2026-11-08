@@ -97,13 +97,70 @@ class WorkdayFetchTest(unittest.TestCase):
         self.assertEqual(other.description_text, "")
         self.assertIsNone(other.posted_at)
 
-    def test_stops_on_empty_page(self):
+    def test_listing_that_ends_before_total_is_an_error(self):
         first = copy.deepcopy(self.pages[0])
         first["total"] = 500
         pages = [first, {"total": 0, "jobPostings": []}]
         client = FakeClient(get=details, post=pages_by_offset(pages))
-        self.assertEqual(workday.fetch(capital_one(), client), [])
+        with self.assertRaisesRegex(ScrapeError, "ended at 20 of 500"):
+            workday.fetch(capital_one(), client)
         self.assertEqual(len(client.post_calls), 2)
+
+    def test_short_non_empty_last_page_ends_the_listing_even_below_the_reported_total(self):
+        # Workday totals are approximate: a partial page is the real end of the listing, not a truncation.
+        first = copy.deepcopy(self.pages[0])
+        first["total"] = 500
+        client = FakeClient(get=details, post=pages_by_offset([first, self.pages[1]]))
+        jobs = workday.fetch(capital_one(), client)
+        self.assertEqual(len(client.post_calls), 2)
+        self.assertEqual(len(jobs), 2)
+
+    def test_first_page_without_total_is_an_error(self):
+        for total in (None, 0, "500", True):
+            with self.subTest(total=total):
+                first = copy.deepcopy(self.pages[0])
+                if total is None:
+                    first.pop("total", None)
+                else:
+                    first["total"] = total
+                client = FakeClient(get=details, post=pages_by_offset([first, self.pages[1]]))
+                with self.assertRaises(ParseError):
+                    workday.fetch(capital_one(), client)
+
+    def test_empty_first_page_with_a_positive_total_is_an_error(self):
+        client = FakeClient(post=lambda url, body: {"total": 40, "jobPostings": []})
+        with self.assertRaisesRegex(ScrapeError, "ended at 0 of 40"):
+            workday.fetch(capital_one(), client)
+
+    def test_malformed_detail_is_skipped_when_another_posting_parses(self):
+        def one_broken(url):
+            if url == BASE + GRAD_PATH:
+                return {"nothing": True}
+            return details(url)
+
+        client = FakeClient(get=one_broken, post=pages_by_offset(self.pages))
+        jobs = workday.fetch(capital_one(), client)
+        self.assertEqual([j.title for j in jobs], ["Intern, Strategy Analyst - Summer 2027"])
+
+    def test_candidate_with_a_bad_path_is_skipped_when_another_posting_parses(self):
+        second = copy.deepcopy(self.pages[1])
+        grad = next(p for p in second["jobPostings"] if p["externalPath"] == GRAD_PATH)
+        grad["externalPath"] = "/job/../../admin"
+        client = FakeClient(get=details, post=pages_by_offset([self.pages[0], second]))
+        jobs = workday.fetch(capital_one(), client)
+        self.assertEqual([j.title for j in jobs], ["Intern, Strategy Analyst - Summer 2027"])
+        self.assertEqual(client.get_calls, [BASE + INTERN_PATH])
+
+    def test_bad_path_on_a_dropped_posting_is_not_a_failure(self):
+        first = copy.deepcopy(self.pages[0])
+        director = next(p for p in first["jobPostings"] if p["title"] == "Director, Risk Management")
+        director["externalPath"] = "not-a-path"
+        client = FakeClient(get=details, post=pages_by_offset([first, self.pages[1]]))
+        self.assertEqual(len(workday.fetch(capital_one(), client)), 2)
+
+    def test_empty_board_is_ok(self):
+        client = FakeClient(post=lambda url, body: {"total": 0, "jobPostings": []})
+        self.assertEqual(workday.fetch(capital_one(), client), [])
 
     def test_truncated_listing_is_an_error(self):
         client = FakeClient(get=details, post=pages_by_offset(self.pages))

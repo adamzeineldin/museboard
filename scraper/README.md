@@ -51,5 +51,15 @@ Google Careers and every other host are refused before any connection is made.
 }
 ```
 
+`id`, `title`, `location`, `compensation` and `department` are at most 500 characters and `url` at most 2048
+(the worker's limits in `worker/runSchema.ts`): long text is cut with an ellipsis, and a posting with a longer id
+or URL is skipped. A malformed posting (including a Workday posting whose detail page has an unexpected shape) is
+logged and skipped. A company is reported `ok: false` when at least one posting fails to parse and none parses, or
+a Workday listing page comes back empty before the reported total, so the worker never closes jobs on an incomplete
+listing. Workday totals are approximate, so a short page that still has postings ends the listing normally.
+
+This is deliberately fail safe: on a board with no early-career matches, a single unparseable posting makes that
+company report a failure on every run (its jobs are not closed) until the posting or the adapter is fixed.
+
 Exit codes: `0` at least one company ok, `1` every company failed (JSON still written), `2` usage/config error
 (nothing written).

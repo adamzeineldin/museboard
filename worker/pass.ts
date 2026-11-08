@@ -2,7 +2,8 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { ingestRun, type IngestResult } from "./ingest";
 import type { ScraperResult } from "./runScraper";
 
-// One worker pass: scrape -> ingest -> recompute matches for every user with a default resume.
+// One worker pass: scrape -> ingest -> recompute matches for every user with a default resume, then delete expired
+// sign-in links (always, even when the scrape or ingest fails).
 // Job ingest is not per-user, so it writes no AuditEvent; it is logged instead.
 
 export interface Logger {
@@ -15,6 +16,8 @@ export interface PassDeps {
   prisma: PrismaClient;
   scrape: () => Promise<ScraperResult>;
   recompute: (userId: string) => Promise<number>;
+  /** Housekeeping after the scrape (deleteExpiredVerificationTokens); returns the number of rows deleted. */
+  cleanup?: (now: Date) => Promise<number>;
   now?: () => Date;
   logger: Logger;
 }
@@ -56,19 +59,40 @@ async function recomputeAll(deps: PassDeps): Promise<MatchCounts> {
   return { users: users.length, ok, failed: users.length - ok };
 }
 
+/** Never throws: a failed cleanup is logged and retried on the next pass. */
+async function runCleanup(deps: PassDeps, now: Date): Promise<void> {
+  if (!deps.cleanup) return;
+  try {
+    const deleted = await deps.cleanup(now);
+    deps.logger.info(`[worker] deleted ${deleted} expired sign-in links`);
+  } catch (error) {
+    deps.logger.error(`[worker] sign-in link cleanup failed: ${errorMessage(error)}`);
+  }
+}
+
 export async function runPass(deps: PassDeps): Promise<PassSummary> {
   const clock = deps.now ?? (() => new Date());
   const startedAt = clock();
-  const scraped = await deps.scrape();
-  if (scraped.exitCode === 1) deps.logger.warn("[worker] scraper reported that every company failed");
+  try {
+    const scraped = await deps.scrape();
+    if (scraped.exitCode === 1) deps.logger.warn("[worker] scraper reported that every company failed");
 
-  const ingest = await ingestRun(deps.prisma, scraped.json, startedAt);
-  for (const failure of ingest.failures) {
-    deps.logger.warn(`[worker] skipped ${failure.company}: ${failure.error}`);
+    const ingest = await ingestRun(deps.prisma, scraped.json, startedAt);
+    for (const failure of ingest.failures) {
+      deps.logger.warn(`[worker] skipped ${failure.company}: ${failure.error}`);
+    }
+
+    const matches = await recomputeAll(deps);
+    return { startedAt, durationMs: clock().getTime() - startedAt.getTime(), exitCode: scraped.exitCode, ingest, matches };
+  } finally {
+    // Runs on every pass whatever the scrape result; runCleanup never throws, so it cannot mask the scrape error.
+    await runCleanup(deps, startedAt);
   }
+}
 
-  const matches = await recomputeAll(deps);
-  return { startedAt, durationMs: clock().getTime() - startedAt.getTime(), exitCode: scraped.exitCode, ingest, matches };
+/** A pass where the scraper reported that every company failed (exit code 1) is a failure for scrape:once. */
+export function passSucceeded(summary: PassSummary): boolean {
+  return summary.exitCode === 0;
 }
 
 export function formatSummary(summary: PassSummary): string {

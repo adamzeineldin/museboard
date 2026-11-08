@@ -9,9 +9,15 @@ from ..classify import classify
 from ..config import CompanyConfig
 from ..errors import ParseError
 from ..models import Job, make_job_id
+from ..text import truncate
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
+
+# Limits of the worker's contract (worker/runSchema.ts). A value over them would make the worker reject
+# the whole run, so short text is cut here and a posting with an over-long id or URL is skipped.
+MAX_SHORT_TEXT = 500
+MAX_URL = 2048
 
 
 def text_or_none(value: Any) -> str | None:
@@ -19,6 +25,11 @@ def text_or_none(value: Any) -> str | None:
         stripped = " ".join(value.split())
         return stripped or None
     return None
+
+
+def short_text(value: str | None) -> str | None:
+    """Cut a title/location/compensation/department value to the worker's limit."""
+    return None if value is None else truncate(value, MAX_SHORT_TEXT)
 
 
 def require_list(value: Any, what: str) -> list[Any]:
@@ -55,31 +66,49 @@ def build_job(
     job_type = classify(clean_title, description_text, employment_type)
     if job_type is None and not include_all:
         return None
+    job_id = make_job_id(company.ats, company.slug, posting_id)
+    if len(job_id) > MAX_SHORT_TEXT:
+        raise ParseError(f"posting id is longer than {MAX_SHORT_TEXT} characters")
+    clean_url = url if isinstance(url, str) else ""
+    if len(clean_url) > MAX_URL:
+        raise ParseError(f"posting url is longer than {MAX_URL} characters")
     return Job(
-        id=make_job_id(company.ats, company.slug, posting_id),
+        id=job_id,
         company=company.name,
         ats=company.ats,
-        title=clean_title,
-        location=location,
+        title=truncate(clean_title, MAX_SHORT_TEXT),
+        location=short_text(location),
         type=job_type,
         posted_at=posted_at,
-        url=url if isinstance(url, str) else "",
+        url=clean_url,
         source=source,
         description_text=description_text,
-        compensation=compensation,
-        department=department,
+        compensation=short_text(compensation),
+        department=short_text(department),
     )
 
 
 def parse_each(items: Iterable[T], company: CompanyConfig, parse_one: Callable[[T], Job | None]) -> list[Job]:
-    """Parse postings one by one; a malformed posting is logged and skipped, not fatal."""
+    """Parse postings one by one; a malformed posting is logged and skipped, not fatal.
+
+    If a posting failed and none parsed (every posting malformed, or the rest dropped by the classifier), raise
+    instead: reporting the company as ok with no jobs would make the worker close all of its open jobs.
+    """
     jobs: list[Job] = []
+    total = 0
+    skipped = 0
     for item in items:
+        total += 1
         try:
             job = parse_one(item)
         except (ParseError, ValueError, TypeError, AttributeError, KeyError) as exc:
+            skipped += 1
             log.warning("%s: skipping malformed posting: %s", company.name, exc)
             continue
         if job is not None:
             jobs.append(job)
+    if skipped == total and total > 0:
+        raise ParseError(f"{company.name}: all {total} postings failed to parse")
+    if skipped > 0 and not jobs:
+        raise ParseError(f"{company.name}: {skipped} of {total} postings failed to parse and none parsed")
     return jobs

@@ -10,8 +10,8 @@ campaign the user approved. It also runs as a connector that Meta's Muse agent c
 
 ## Stack
 
-Next.js 16 (App Router, TypeScript strict, Tailwind 4) · Prisma 7 with SQLite locally (driver adapter
-`better-sqlite3`; schema kept Postgres-compatible) · Auth.js v5 email magic link with database sessions ·
+Next.js 16 (App Router, TypeScript strict, Tailwind 4) · Prisma 7 with SQLite (driver adapter
+`better-sqlite3`; schema kept Postgres-compatible, but Postgres is not wired up yet) · Auth.js v5 email magic link with database sessions ·
 zod · Vitest · Playwright · Python scraper in `scraper/`.
 
 ## Quickstart
@@ -20,7 +20,7 @@ Requires Node 22.12+ (developed on Node 24) and Python 3.11+ for the scraper.
 
 ```bash
 npm install                 # also runs `prisma generate` (client goes to src/generated/prisma)
-cp .env.example .env        # then set AUTH_SECRET: npx auth secret
+cp .env.example .env        # then set AUTH_SECRET in .env, e.g. to the output of: openssl rand -base64 33
 npm run db:push             # create dev.db from prisma/schema.prisma
 npm run db:seed             # sample companies, 8 jobs, demo user demo@inroad.test with 4 contacts
 npm run dev                 # http://localhost:3000
@@ -35,14 +35,16 @@ the Jobs page) to get match scores, then approve a campaign on `/campaign`.
 
 | Variable | Needed | What it is |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | `file:./dev.db` locally (SQLite); a Postgres URL in production |
-| `AUTH_SECRET` | yes | Auth.js secret (`npx auth secret`). Also signs the digest's pause/unsubscribe links (16+ chars) |
+| `DATABASE_URL` | yes | SQLite `file:` URL, e.g. `file:./dev.db`. Postgres is not supported yet (see `TODO(postgres)` in `src/lib/prisma-client.ts`) |
+| `AUTH_SECRET` | yes | Auth.js secret (`openssl rand -base64 33`). Also signs the digest's pause/unsubscribe links (16+ chars). Put it in `.env`: the worker, seed and token scripts read only `.env`, not `.env.local` |
 | `AUTH_URL` | yes | Public base URL, e.g. `http://localhost:3000` |
 | `APP_URL` | production | Base URL for email links and the Muse connector (falls back to `AUTH_URL`) |
 | `EMAIL_SERVER`, `EMAIL_FROM` | production | SMTP for magic links and the digest. Unset in dev: mail goes to `.dev-mail/` |
 | `INROAD_DEV_MAIL=1` | optional | Allow the `.dev-mail/` fallback under `next start` (test deployments only) |
 | `INROAD_STORAGE_DIR` | optional | Where uploaded resumes are stored (default `./storage`) |
 | `DEV_MAIL_DIR` | optional | Override the `.dev-mail/` directory |
+| `INROAD_PYTHON` | optional | Python 3.11+ executable the worker runs the scraper with (default `python3`) |
+| `INROAD_EMBEDDER` | optional | Match-score embedder. Only `local` (the default) is supported |
 
 ### Worker: job sync and the weekly digest
 
@@ -50,9 +52,24 @@ the Jobs page) to get match scores, then approve a campaign on `/campaign`.
 npm run worker              # long-running: scraper every 6 hours, weekly digest Mondays 13:00 UTC
 npm run scrape:once         # one scraper run: upsert jobs, close missing ones, recompute matches
 npm run digest:once         # send the weekly digest now (safe to re-run: a week already sent is skipped)
+npm run worker:prod         # the worker with NODE_ENV=production: use this in production
+npm run digest:once:prod    # digest:once with NODE_ENV=production: use this for a manual send in production
 ```
 
 The scraper only reads public Greenhouse, Lever, Ashby and Workday job-board APIs (`scraper/`).
+`scrape:once` exits 1 when the run fails or every company failed, so cron or a health check can alert on it.
+
+In production, run the worker with `NODE_ENV=production` (`npm run worker:prod`, or set it in your process
+manager), and send a manual digest with `npm run digest:once:prod`. The worker runs through `tsx`, so unlike `next start` nothing sets it for you. Without it, a missing
+`EMAIL_SERVER` makes the digest write every email to `.dev-mail/` and record it as sent, and a missing `APP_URL`
+points its links at `http://localhost:3000`. The worker logs a warning at startup when either fallback is active.
+
+The web app and the worker share one SQLite file. The database runs in WAL mode, and a write waits up to
+15 seconds for the other process's write lock before it fails. `better-sqlite3` is synchronous, so while a write
+waits on that lock the whole web process is blocked, not just that request. Moving to Postgres removes this
+(`TODO(postgres)` in `src/lib/prisma-client.ts`).
+
+Each worker pass also deletes expired sign-in links. A failed cleanup is logged and retried on the next pass.
 
 ### Connect Muse (MCP)
 
@@ -89,7 +106,7 @@ with mail and resume storage in that dir too; it never touches `dev.db` and make
 | `npm run typecheck` | `prisma generate` then `tsc --noEmit` |
 | `npm test` / `test:coverage` | Vitest, optionally with V8 coverage |
 | `npm run db:push` / `db:seed` | Push the schema to `DATABASE_URL`; idempotent sample data |
-| `npm run worker` / `scrape:once` / `digest:once` | Scheduled worker; one scraper run; one digest run |
+| `npm run worker` / `worker:prod` / `scrape:once` / `digest:once` / `digest:once:prod` | Scheduled worker; one scraper run; one digest run (the `:prod` scripts set `NODE_ENV=production`) |
 | `npm run mcp:token -- <email>` | Mint a Muse connector token for an existing account (printed once) |
 | `npm run e2e` | Playwright journey, axe and auth specs on a throwaway DB |
 

@@ -57,6 +57,20 @@ class LeverParseTest(unittest.TestCase):
         payload[0]["salaryDescriptionPlain"] = "  $45/hr  "
         self.assertEqual(lever.parse(payload, PALANTIR)[0].compensation, "$45/hr")
 
+    def test_long_salary_description_is_cut_to_the_worker_limit(self):
+        payload = copy.deepcopy(self.payload)
+        payload[0]["salaryDescriptionPlain"] = "Pay transparency. " * 40
+        compensation = lever.parse(payload, PALANTIR)[0].compensation
+        self.assertLessEqual(len(compensation), 500)
+        self.assertTrue(compensation.startswith("Pay transparency."))
+
+    def test_every_posting_without_a_title_fails_the_company(self):
+        payload = copy.deepcopy(self.payload)
+        for posting in payload:
+            posting.pop("text", None)
+        with self.assertRaises(ParseError):
+            lever.parse(payload, PALANTIR)
+
     def test_rejects_unexpected_payload(self):
         for payload in ({"ok": False}, None, "x"):
             with self.subTest(payload=payload):

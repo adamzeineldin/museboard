@@ -9,9 +9,12 @@ Detail:  GET  https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}{e
   timeType, jobReqId, externalUrl, ...}}``
 
 Large tenants list thousands of postings, so details are fetched only for titles that
-might be early-career (``might_be_early_career``). A listing cut short by ``max_pages`` or a
+might be early-career (``might_be_early_career``). Totals are approximate, so a short non-empty page
+ends the listing without error. A listing cut short by ``max_pages``, a page that comes back empty
+before ``total`` is reached, a first page without a usable ``total``, or a
 candidate set above ``max_details`` raises, so the company is reported ``ok: false`` and the
-worker does not close its jobs on an incomplete picture.
+worker does not close its jobs on an incomplete picture. Each posting is built through ``parse_each``:
+a malformed one is skipped, under the same failure rule as the other adapters.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from ..dates import iso_from_date
 from ..errors import ParseError, ScrapeError
 from ..models import Job
 from ..text import strip_html
-from .common import build_job, require_dict, require_list, text_or_none
+from .common import build_job, parse_each, require_dict, require_list, text_or_none
 
 ATS = "workday"
 SOURCE = "Workday feed"
@@ -74,6 +77,19 @@ def posting_id_from_path(external_path: str) -> str:
     return last.rsplit("_", 1)[-1] if "_" in last else last
 
 
+def _first_page_total(payload: dict[str, Any], items: list[Any]) -> int:
+    """The posting count from the first page; without it the listing cannot be known to be complete.
+
+    Read even when the page is empty: a positive total with no items is a short listing, not an empty board.
+    """
+    raw_total = payload.get("total")
+    if isinstance(raw_total, int) and not isinstance(raw_total, bool) and raw_total > 0:
+        return raw_total
+    if not items:
+        return 0
+    raise ParseError(f"workday listing has no usable total ({raw_total!r})")
+
+
 def _list_postings(company: CompanyConfig, client: Any) -> list[dict[str, Any]]:
     max_pages = company.options.get("max_pages", DEFAULT_MAX_PAGES)
     postings: list[dict[str, Any]] = []
@@ -83,12 +99,13 @@ def _list_postings(company: CompanyConfig, client: Any) -> list[dict[str, Any]]:
         payload = require_dict(client.post_json(build_url(company), body), "workday listing")
         items = require_list(payload.get("jobPostings"), "workday jobPostings")
         if total is None:
-            raw_total = payload.get("total")
-            total = raw_total if isinstance(raw_total, int) and not isinstance(raw_total, bool) else 0
+            total = _first_page_total(payload, items)
         postings = postings + [item for item in items if isinstance(item, dict)]
-        if not items or (page + 1) * PAGE_SIZE >= total:
-            if items == [] and len(postings) < total:
-                log.warning("%s: workday listing ended at %d of %d postings", company.name, len(postings), total)
+        if items == [] and len(postings) < total:
+            # A short listing must not look complete, or the worker would close the jobs it is missing.
+            raise ScrapeError(f"workday listing ended at {len(postings)} of {total} postings")
+        # Workday totals are approximate, so a short non-empty page is the real end of the listing.
+        if len(items) < PAGE_SIZE or (page + 1) * PAGE_SIZE >= total:
             return postings
     raise ScrapeError(f"workday listing truncated at {max_pages} pages ({total} postings reported)")
 
@@ -131,29 +148,27 @@ def _job_from_listing(company: CompanyConfig, listing: dict[str, Any]) -> Job | 
     )
 
 
+def _is_candidate(listing: dict[str, Any]) -> bool:
+    return might_be_early_career(listing.get("title"))
+
+
+def _parse_posting(company: CompanyConfig, client: Any, item: dict[str, Any], include_all: bool) -> Job | None:
+    """One posting; raises ParseError (skipped by parse_each) when it is malformed. HTTP errors stay fatal."""
+    candidate = _is_candidate(item)
+    if not candidate and not include_all:
+        return None
+    listing = {**item, "externalPath": _validated_path(item.get("externalPath"))}
+    if not candidate:
+        return _job_from_listing(company, listing)
+    detail = client.get_json(detail_url(company, listing["externalPath"]))
+    return _job_from_detail(company, listing, detail, include_all)
+
+
 def fetch(company: CompanyConfig, client: Any, include_all: bool = False) -> list[Job]:
-    listings = []
-    for item in _list_postings(company, client):
-        try:
-            listings.append({**item, "externalPath": _validated_path(item.get("externalPath"))})
-        except ParseError as exc:
-            log.warning("%s: skipping posting: %s", company.name, exc)
-    candidates = [item for item in listings if might_be_early_career(item.get("title"))]
+    listings = _list_postings(company, client)
+    candidates = [item for item in listings if _is_candidate(item)]
     max_details = company.options.get("max_details", DEFAULT_MAX_DETAILS)
     if len(candidates) > max_details:
         raise ScrapeError(f"workday: {len(candidates)} candidate postings exceed max_details={max_details}")
-    candidate_paths = {item["externalPath"] for item in candidates}
     log.info("%s: %d postings listed, fetching %d candidate details", company.name, len(listings), len(candidates))
-    jobs: list[Job] = []
-    for item in listings:
-        path = item["externalPath"]
-        if path in candidate_paths:
-            url = detail_url(company, path)
-            job = _job_from_detail(company, item, client.get_json(url), include_all)
-        elif include_all:
-            job = _job_from_listing(company, item)
-        else:
-            job = None
-        if job is not None:
-            jobs.append(job)
-    return jobs
+    return parse_each(listings, company, lambda item: _parse_posting(company, client, item, include_all))

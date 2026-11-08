@@ -1,16 +1,19 @@
 import "dotenv/config";
+import { deleteExpiredVerificationTokens } from "@/lib/auth-cleanup";
 import { db } from "@/lib/db";
 import { sendWeeklyDigests } from "@/lib/digest";
 import { recomputeMatches } from "@/lib/matching";
 import { parseWorkerArgs } from "./args";
 import { runDigestJob } from "./digest";
-import { formatSummary, runPass, type Logger } from "./pass";
+import { devFallbackWarnings } from "./env-warnings";
+import { formatSummary, passSucceeded, runPass, type Logger } from "./pass";
 import { runScraper } from "./runScraper";
 import { DIGEST_CRON, exclusive, registerSchedules, SCRAPE_CRON, type StoppableTask } from "./schedule";
 
 // Entry point. Run through tsx with the react-server condition so `server-only` imports resolve:
 //   npm run worker        -> one pass now (unless --no-initial), then every 6 hours
-//   npm run scrape:once   -> one pass, exit 0 on success / 1 on failure
+//   npm run worker:prod   -> the same with NODE_ENV=production (missing EMAIL_SERVER/APP_URL then fail loudly)
+//   npm run scrape:once   -> one pass, exit 0 on success / 1 on failure (including every company failing)
 
 const logger: Logger = {
   info: (message) => console.info(message),
@@ -22,12 +25,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** One pass. Never throws: returns false and logs on failure so the schedule keeps running. */
+/** One pass. Never throws: returns false (and logs) on failure or when every company failed, so the schedule keeps running. */
 async function scrapeAndIngest(): Promise<boolean> {
   try {
-    const summary = await runPass({ prisma: db, scrape: () => runScraper(), recompute: recomputeMatches, logger });
+    const summary = await runPass({
+      prisma: db,
+      scrape: () => runScraper(),
+      recompute: recomputeMatches,
+      cleanup: deleteExpiredVerificationTokens,
+      logger,
+    });
     logger.info(formatSummary(summary));
-    return true;
+    return passSucceeded(summary);
   } catch (error) {
     logger.error(`[worker] run failed at ${new Date().toISOString()}: ${errorMessage(error)}`);
     return false;
@@ -42,6 +51,7 @@ async function shutdown(tasks: readonly StoppableTask[], code: number): Promise<
 
 async function main(argv: readonly string[]): Promise<void> {
   const args = parseWorkerArgs(argv);
+  for (const warning of devFallbackWarnings()) logger.warn(warning);
 
   if (args.mode === "once") {
     const ok = await scrapeAndIngest();

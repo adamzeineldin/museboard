@@ -15,8 +15,10 @@
     "db:push": "prisma db push && prisma generate",
     "db:seed": "prisma db seed",
     "worker": "tsx --conditions=react-server worker/index.ts",
+    "worker:prod": "NODE_ENV=production tsx --conditions=react-server worker/index.ts",
     "scrape:once": "tsx --conditions=react-server worker/index.ts --once",
     "digest:once": "tsx --conditions=react-server worker/digest-once.ts",
+    "digest:once:prod": "NODE_ENV=production tsx --conditions=react-server worker/digest-once.ts",
     "mcp:token": "tsx --conditions=react-server src/mcp/cli/create-token.ts",
     "e2e": "playwright test",
     "postinstall": "prisma generate"
