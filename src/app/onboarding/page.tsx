@@ -2,18 +2,10 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { requireUser } from "@/lib/current-user";
-import { isProfileComplete } from "@/lib/profile";
+import { DEFAULT_TIME_ZONE, isProfileComplete, supportedTimeZones } from "@/lib/profile";
 import { OnboardingForm } from "./OnboardingForm";
 
 export const metadata: Metadata = { title: "Welcome" };
-
-const DEFAULT_TIME_ZONE = "UTC";
-
-function supportedTimeZones(current: string): string[] {
-  const zones = Intl.supportedValuesOf("timeZone");
-  const withUtc = zones.includes(DEFAULT_TIME_ZONE) ? zones : [DEFAULT_TIME_ZONE, ...zones];
-  return withUtc.includes(current) ? withUtc : [current, ...withUtc];
-}
 
 // Lives outside the (app) group because the (app) layout redirects incomplete profiles here.
 export default async function OnboardingPage() {

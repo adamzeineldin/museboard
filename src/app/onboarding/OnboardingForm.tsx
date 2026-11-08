@@ -1,68 +1,55 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui";
-import { saveProfile, type OnboardingState } from "./actions";
+import { saveProfile } from "./actions";
+import { fieldValues, INITIAL_ONBOARDING_STATE, withBrowserTimeZone, type ProfileFormValues } from "./form-state";
+import { OnboardingFields } from "./OnboardingFields";
 
 export interface OnboardingFormProps {
-  defaults: { name: string; school: string; gradYear: string; timezone: string };
+  defaults: ProfileFormValues;
   /** True when the stored time zone is just the schema default, so the browser's zone should win. */
   useBrowserTimeZone: boolean;
   timeZones: string[];
   gradYears: number[];
 }
 
-const INITIAL: OnboardingState = { fieldErrors: {}, formError: null };
+const noSubscription = () => () => {};
+const readBrowserTimeZone = (): string | null => Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+const noBrowserTimeZone = (): string | null => null;
 
 export function OnboardingForm({ defaults, useBrowserTimeZone, timeZones, gradYears }: OnboardingFormProps) {
-  const [state, action, pending] = useActionState(saveProfile, INITIAL);
+  const [state, action, pending] = useActionState(saveProfile, INITIAL_ONBOARDING_STATE);
   const tzRef = useRef<HTMLSelectElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Null on the server and during hydration, then the browser's zone. Added as an option when the list spells it differently.
+  const detectedZone = useSyncExternalStore(noSubscription, readBrowserTimeZone, noBrowserTimeZone);
+  const browserZone = useBrowserTimeZone ? detectedZone : null;
+  const zones = useMemo(() => withBrowserTimeZone(timeZones, browserZone), [timeZones, browserZone]);
 
   useEffect(() => {
-    if (!useBrowserTimeZone || !tzRef.current) return;
-    const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (browserZone && timeZones.includes(browserZone)) tzRef.current.value = browserZone;
-  }, [useBrowserTimeZone, timeZones]);
+    if (browserZone && tzRef.current) tzRef.current.value = browserZone;
+  }, [browserZone]);
 
-  const err = state.fieldErrors;
+  // After a failed submit, move focus to the first field that needs fixing so its error is read out.
+  useEffect(() => {
+    if (Object.keys(state.fieldErrors).length === 0) return;
+    formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [state]);
+
+  // React resets a form after its action runs. Remounting with the echoed values keeps what the user typed
+  // (selects ignore defaultValue changes, so a plain re-render would snap the time zone back).
+  const formKey = state.values ? JSON.stringify(state.values) : "initial";
   return (
-    <form action={action} noValidate>
-      <label className="field">
-        <span className="label">Your name</span>
-        <input name="name" autoComplete="name" required defaultValue={defaults.name} aria-invalid={err.name ? true : undefined} />
-        {err.name ? <span className="error">{err.name}</span> : null}
-      </label>
-      <label className="field">
-        <span className="label">School</span>
-        <input name="school" autoComplete="organization" required defaultValue={defaults.school} aria-invalid={err.school ? true : undefined} />
-        {err.school ? <span className="error">{err.school}</span> : null}
-      </label>
-      <label className="field">
-        <span className="label">Graduation year</span>
-        <select name="gradYear" required defaultValue={defaults.gradYear} aria-invalid={err.gradYear ? true : undefined}>
-          <option value="" disabled>
-            Pick a year
-          </option>
-          {gradYears.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
-        {err.gradYear ? <span className="error">{err.gradYear}</span> : null}
-      </label>
-      <label className="field">
-        <span className="label">Time zone</span>
-        <select ref={tzRef} name="timezone" required defaultValue={defaults.timezone} aria-invalid={err.timezone ? true : undefined}>
-          {timeZones.map((zone) => (
-            <option key={zone} value={zone}>
-              {zone.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-        <span className="hint">Weekly limits reset Monday at midnight in this time zone.</span>
-        {err.timezone ? <span className="error">{err.timezone}</span> : null}
-      </label>
+    <form key={formKey} ref={formRef} action={action} noValidate>
+      <OnboardingFields
+        values={fieldValues(state, defaults)}
+        errors={state.fieldErrors}
+        timeZones={zones}
+        gradYears={gradYears}
+        timeZoneRef={tzRef}
+      />
       {state.formError ? (
         <p className="banner hold" role="alert">
           {state.formError}

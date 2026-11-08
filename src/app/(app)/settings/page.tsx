@@ -4,12 +4,15 @@ import { DigestSection } from "@/components/digest/DigestSection";
 import { formatRelative } from "@/components/shell/format";
 import { ResumeList } from "@/components/resume/ResumeList";
 import { ResumeUploadForm } from "@/components/resume/ResumeUploadForm";
+import { TimeZoneForm } from "@/components/settings/TimeZoneForm";
 import { Button, EmptyState, Panel } from "@/components/ui";
 import { signOut } from "@/lib/auth";
 import { requireUser } from "@/lib/current-user";
+import { supportedTimeZones, timeZoneLabel } from "@/lib/profile";
 import { listResumes, resumeDownloadPath } from "@/lib/resume";
 import { deleteResumeAction, setDefaultResumeAction, uploadResumeAction } from "./actions";
 import { setDigestPreferenceAction } from "./digest-actions";
+import { updateTimeZoneAction } from "./profile-actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -73,8 +76,9 @@ export default async function SettingsPage() {
           <b>{user.name}</b> · {user.school}, class of {user.gradYear}
         </p>
         <p className="muted">
-          {user.email} · {user.timezone.replace(/_/g, " ")}
+          {user.email} · {timeZoneLabel(user.timezone)}
         </p>
+        <TimeZoneForm current={user.timezone} timeZones={supportedTimeZones(user.timezone)} action={updateTimeZoneAction} />
         <form action={signOutAction}>
           <Button type="submit">Sign out</Button>
         </form>

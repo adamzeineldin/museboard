@@ -4,30 +4,18 @@ import { redirect } from "next/navigation";
 import { writeAudit } from "@/lib/audit";
 import { requireUser } from "@/lib/current-user";
 import { db } from "@/lib/db";
-import { profileSchema } from "@/lib/profile";
-
-export interface OnboardingState {
-  fieldErrors: Partial<Record<"name" | "school" | "gradYear" | "timezone", string>>;
-  formError: string | null;
-}
+import { isProfileComplete, profileSchemaFor } from "@/lib/profile";
+import { profileFieldErrors, readProfileForm, type OnboardingState } from "./form-state";
 
 export async function saveProfile(_prev: OnboardingState, formData: FormData): Promise<OnboardingState> {
   const user = await requireUser();
-  const parsed = profileSchema.safeParse({
-    name: formData.get("name") ?? "",
-    school: formData.get("school") ?? "",
-    gradYear: formData.get("gradYear") ?? "",
-    timezone: formData.get("timezone") ?? "",
-  });
+  // Onboarding is one-time. A finished profile (stale tab, crafted post) must not rewrite the time zone that sets the week window.
+  if (isProfileComplete(user)) redirect("/jobs");
+
+  const values = readProfileForm(formData);
+  const parsed = profileSchemaFor(user.timezone).safeParse(values);
   if (!parsed.success) {
-    const fieldErrors: OnboardingState["fieldErrors"] = {};
-    for (const issue of parsed.error.issues) {
-      const key = issue.path[0];
-      if ((key === "name" || key === "school" || key === "gradYear" || key === "timezone") && !fieldErrors[key]) {
-        fieldErrors[key] = issue.message;
-      }
-    }
-    return { fieldErrors, formError: null };
+    return { fieldErrors: profileFieldErrors(parsed.error.issues), formError: null, values };
   }
 
   try {
@@ -35,7 +23,7 @@ export async function saveProfile(_prev: OnboardingState, formData: FormData): P
     await writeAudit(user.id, "user", "profile.updated", { fields: Object.keys(parsed.data) });
   } catch (error) {
     console.error("[onboarding] saving profile failed", { userId: user.id, error: error instanceof Error ? error.message : error });
-    return { fieldErrors: {}, formError: "We couldn't save your profile. Try again." };
+    return { fieldErrors: {}, formError: "We couldn't save your profile. Try again.", values };
   }
   redirect("/jobs");
 }
