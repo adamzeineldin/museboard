@@ -114,7 +114,8 @@ async function refuseRecording(userId: string, actor: Actor, application: Applic
 /**
  * prepared -> submitted (idempotent when already submitted). Records what Muse or the user reported, only
  * when submissionGate allows it; a refusal throws ApplicationError 'not_released' and is audited as
- * 'application.record_refused'. Web and MCP share this check. `now` is the clock for the release check.
+ * 'application.record_refused'. Web and MCP share this check. `now` is the clock for the release check
+ * and the submittedAt stamp, so the row counts in the same week the gate checked.
  */
 export async function recordSubmission(
   userId: string,
@@ -135,7 +136,7 @@ export async function recordSubmission(
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "prepared" },
-      data: { status: "submitted", submittedAt: new Date(), confirmationText: text },
+      data: { status: "submitted", submittedAt: now, confirmationText: text },
     });
     if (count === 0) return null;
     const row = await tx.application.findUniqueOrThrow({ where: { id: application.id } });

@@ -26,6 +26,20 @@ const campaign = (overrides: Partial<RuleCampaign> = {}, rules: Partial<Campaign
 
 const fail = (reason: string) => ({ ok: false, reason });
 
+describe("checkApplication: company names", () => {
+  it("matches company names the way the rest of the app does (case and runs of spaces)", () => {
+    const spaced = campaign({}, { autoCompanies: ["Capital  One"], askFirstCompanies: ["  meta   platforms "] });
+    expect(checkApplication({ companyName: "Capital One", type: "intern" }, MATCH, spaced, 0, NOW)).toEqual({
+      ok: true,
+      reason: "Fits campaign rules",
+    });
+    expect(checkApplication({ companyName: "Meta Platforms", type: "intern" }, MATCH, spaced, 0, NOW)).toMatchObject({
+      ok: false,
+      topChoice: true,
+    });
+  });
+});
+
 describe("checkApplication: each branch", () => {
   it("1. fails when there is no campaign", () => {
     expect(checkApplication(JOB, MATCH, null, 0, NOW)).toEqual(fail("No approved campaign yet"));

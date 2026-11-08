@@ -12,8 +12,10 @@ import { assertEndsOnNotPast, assertResumeOwned, loadUserOrThrow, parseRulesOrTh
  * - created: a new pending version (any earlier pending version is now superseded).
  * - unchanged_pending: the rules equal the current pending version, which is returned as-is.
  * - unchanged_in_force: no pending version and the rules equal the ones in force; nothing changed.
+ * - withdrawn_pending: the rules equal the ones in force while a version was pending. The pending version is
+ *   withdrawn (superseded, so it can no longer be approved) and the version in force is returned.
  */
-export type ProposalOutcome = "created" | "unchanged_pending" | "unchanged_in_force";
+export type ProposalOutcome = "created" | "unchanged_pending" | "unchanged_in_force" | "withdrawn_pending";
 
 export interface ProposalResult {
   version: CampaignVersion;
@@ -34,7 +36,14 @@ function nextCreatedAt(versions: readonly CampaignVersion[], now: Date): Date {
   return new Date(Math.max(now.getTime(), latest + 1));
 }
 
-async function writeProposal(tx: DbClient, userId: string, rules: CampaignRules, now: Date): Promise<WriteOutcome> {
+interface ProposalInput {
+  userId: string;
+  rules: CampaignRules;
+  now: Date;
+  timeZone: string;
+}
+
+async function writeProposal(tx: DbClient, { userId, rules, now, timeZone }: ProposalInput): Promise<WriteOutcome> {
   const existing = await findLiveCampaign(tx, userId);
   // A campaign with no approved version is held paused; the first approval activates it.
   const campaign = existing ?? (await tx.campaign.create({ data: { userId, status: "paused" } }));
@@ -43,10 +52,15 @@ async function writeProposal(tx: DbClient, userId: string, rules: CampaignRules,
   const previousPending = pending ? parseCampaignRules(pending.rules) : null;
   const base = { createdCampaign: !existing, before: rulesInForce, previousPending, supersededVersionId: null };
 
-  if (pending && rulesEqual(rules, previousPending)) return { ...base, version: pending, outcome: "unchanged_pending" };
-  if (!pending && inForce && rulesEqual(rules, rulesInForce)) {
-    return { ...base, version: inForce, outcome: "unchanged_in_force" };
+  if (inForce && rulesEqual(rules, rulesInForce)) {
+    if (!pending) return { ...base, version: inForce, outcome: "unchanged_in_force" };
+    // Reverting to the rules in force withdraws the pending proposal instead of adding a copy of them.
+    await tx.campaignVersion.update({ where: { id: pending.id }, data: { supersededAt: now } });
+    return { ...base, version: inForce, outcome: "withdrawn_pending", supersededVersionId: pending.id };
   }
+  // Checked after the in-force branch: saving the rules in force (even ended ones) writes no new rules.
+  assertEndsOnNotPast(rules.endsOn, timeZone, now, "The end date has already passed.");
+  if (pending && rulesEqual(rules, previousPending)) return { ...base, version: pending, outcome: "unchanged_pending" };
   // Rules are immutable once created: retire the old pending version instead of rewriting it, so an
   // approval of its id (after the user saw its summary) can never approve different rules.
   if (pending) {
@@ -62,11 +76,57 @@ async function writeProposal(tx: DbClient, userId: string, rules: CampaignRules,
   return { ...base, version, outcome: "created", supersededVersionId: pending?.id ?? null };
 }
 
+async function auditProposal(
+  tx: DbClient,
+  userId: string,
+  via: ApprovedVia,
+  written: WriteOutcome,
+  after: CampaignRules,
+): Promise<void> {
+  const actor = actorForVia(via);
+  const campaignId = written.version.campaignId;
+  if (written.outcome === "withdrawn_pending") {
+    await writeAudit(
+      userId,
+      actor,
+      "campaign.proposal_withdrawn",
+      {
+        campaignId,
+        versionId: written.supersededVersionId,
+        inForceVersionId: written.version.id,
+        via,
+        withdrawn: written.previousPending,
+      },
+      tx,
+    );
+    return;
+  }
+  if (written.outcome !== "created") return;
+  await writeAudit(
+    userId,
+    actor,
+    "campaign.proposed",
+    {
+      campaignId,
+      versionId: written.version.id,
+      via,
+      createdCampaign: written.createdCampaign,
+      replacedPending: written.supersededVersionId !== null,
+      supersededVersionId: written.supersededVersionId,
+      before: written.before,
+      previousPending: written.previousPending,
+      after,
+    },
+    tx,
+  );
+}
+
 /**
  * Propose rules (ground rule 3: nothing changes until they are approved). Always creates a new pending
  * version and supersedes the previous pending one, except when the rules equal the pending version
- * (returned unchanged) or, with nothing pending, the version in force (a no-op). Starts a campaign when
- * the user has no active or paused one.
+ * (returned unchanged), or equal the version in force: with nothing pending that is a no-op, and with a
+ * version pending it withdraws that version (audited as campaign.proposal_withdrawn). Starts a campaign
+ * when the user has no active or paused one.
  */
 export async function proposeRules(
   userId: string,
@@ -77,31 +137,12 @@ export async function proposeRules(
   const parsedVia = parseViaOrThrow(via);
   const parsed = parseRulesOrThrow(rules);
   const user = await loadUserOrThrow(db, userId);
-  assertEndsOnNotPast(parsed.endsOn, user.timezone, now, "The end date has already passed.");
   await assertResumeOwned(db, userId, parsed.resumeId);
-  // Unchanged proposals change no state, so they write no campaign.proposed entry (an MCP call is still
-  // audited as muse.propose_campaign by the tool layer). A new version and its audit commit together.
+  // Unchanged proposals change no state, so they write no audit entry here (an MCP call is still audited
+  // as muse.propose_campaign by the tool layer). A state change and its audit commit together.
   const outcome = await db.$transaction(async (tx) => {
-    const written = await writeProposal(tx, userId, parsed, now);
-    if (written.outcome === "created") {
-      await writeAudit(
-        userId,
-        actorForVia(parsedVia),
-        "campaign.proposed",
-        {
-          campaignId: written.version.campaignId,
-          versionId: written.version.id,
-          via: parsedVia,
-          createdCampaign: written.createdCampaign,
-          replacedPending: written.supersededVersionId !== null,
-          supersededVersionId: written.supersededVersionId,
-          before: written.before,
-          previousPending: written.previousPending,
-          after: parsed,
-        },
-        tx,
-      );
-    }
+    const written = await writeProposal(tx, { userId, rules: parsed, now, timeZone: user.timezone });
+    await auditProposal(tx, userId, parsedVia, written, parsed);
     return written;
   });
   return { version: outcome.version, outcome: outcome.outcome, supersededVersionId: outcome.supersededVersionId };

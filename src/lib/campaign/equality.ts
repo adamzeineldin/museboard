@@ -1,9 +1,10 @@
+import { normalizeCompanyName } from "@/lib/company-name";
 import type { CampaignRules } from "@/lib/types";
 
-// Pure: do two rule sets mean the same thing? List order and company-name case don't matter.
+// Pure: do two rule sets mean the same thing? List order, company-name case and spacing don't matter.
 
 const normList = (values: readonly string[]): string =>
-  [...new Set(values.map((value) => value.trim().toLowerCase()))].sort().join("\u0000");
+  [...new Set(values.map(normalizeCompanyName))].sort().join("\u0000");
 
 function canonical(rules: CampaignRules): string {
   return JSON.stringify([

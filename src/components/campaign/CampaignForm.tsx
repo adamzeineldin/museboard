@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import type { CampaignRules, JobType } from "@/lib/types";
 import { approveRulesAction, saveRulesAction, setCampaignStatusAction, type CampaignActionResult } from "@/app/(app)/campaign/actions";
 import { ConsentPanel } from "./ConsentPanel";
-import { approveState, cycleCompany, draftToRules, initialDraft, toggleRole, type CampaignDraft } from "./form-model";
+import { approveState, cycleCompany, draftErrors, draftToRules, initialDraft, toggleRole, type CampaignDraft } from "./form-model";
 import { RevokeDialog } from "./RevokeDialog";
 import { RulesFields } from "./RulesFields";
 import { Toast, useToast } from "./Toast";
@@ -17,7 +17,7 @@ export interface CampaignFormProps {
   /** Id of the stored pending version (its rules are `pending`), or null. Posted with Approve. */
   pendingVersionId: string | null;
   pendingNote: string | null;
-  status: "active" | "paused" | null;
+  status: "active" | "paused" | "ended" | null;
   approvedLabel: string | null;
   defaults: { resumeId: string; endsOn: string };
   minEndsOn: string;
@@ -43,12 +43,21 @@ export function CampaignForm(props: CampaignFormProps) {
     setDraft(initialDraft({ pending: props.pending, inForce: props.inForce, defaults: props.defaults }));
   }
   const [revokeOpen, setRevokeOpen] = useState(false);
+  // After a revoke the Revoke button that opened the dialog is gone, so focus moves to the state row instead.
+  // Set only when the revoke succeeds while the dialog is open; cleared whenever the dialog opens or is cancelled.
+  const revoked = useRef(false);
+  const stateRef = useRef<HTMLDivElement>(null);
+  const onRevokeClosed = useCallback(() => {
+    if (!revoked.current) return;
+    revoked.current = false;
+    stateRef.current?.focus();
+  }, []);
   const [busy, startTransition] = useTransition();
   const toast = useToast();
 
   const result = useMemo(() => draftToRules(draft), [draft]);
   const state = approveState(draft, { inForce: props.inForce, pending: props.pending, minEndsOn: props.minEndsOn });
-  const errors = result.ok ? {} : result.errors;
+  const errors = useMemo(() => draftErrors(draft, props.minEndsOn), [draft, props.minEndsOn]);
   const resumeName = props.resumes.find((resume) => resume.id === draft.resumeId)?.filename ?? "";
   // The summary is computed from exactly the rules Approve and Save send; the raw draft is only a fallback
   // while the form is invalid (and then Approve is disabled).
@@ -77,7 +86,7 @@ export function CampaignForm(props: CampaignFormProps) {
     if (result.ok) run(() => saveRulesAction(result.rules));
   };
   const onApprove = (formData: FormData) => {
-    if (result.ok) run(() => approveRulesAction(formData));
+    if (result.ok && state.canApprove) run(() => approveRulesAction(formData));
   };
 
   return (
@@ -103,6 +112,7 @@ export function CampaignForm(props: CampaignFormProps) {
           changed={state.changed}
           approveLabel={state.label}
           canApprove={state.canApprove}
+          approveReasons={state.reasons}
           canSave={state.canSave}
           busy={busy}
           approveVersionId={props.pendingVersionId ?? ""}
@@ -110,14 +120,32 @@ export function CampaignForm(props: CampaignFormProps) {
           onApprove={onApprove}
           onSave={onSave}
           onTogglePause={() => run(() => setCampaignStatusAction(props.status === "paused" ? "active" : "paused"))}
-          onRevoke={() => setRevokeOpen(true)}
+          onRevoke={() => {
+            revoked.current = false;
+            setRevokeOpen(true);
+          }}
+          stateRef={stateRef}
         />
       </div>
       <RevokeDialog
         open={revokeOpen}
         busy={busy}
-        onCancel={() => setRevokeOpen(false)}
-        onConfirm={() => run(() => setCampaignStatusAction("revoked"), () => setRevokeOpen(false))}
+        onCancel={() => {
+          // While the revoke is in flight the dialog stays open, so its outcome is never lost.
+          if (busy) return;
+          revoked.current = false;
+          setRevokeOpen(false);
+        }}
+        onConfirm={() =>
+          run(
+            () => setCampaignStatusAction("revoked"),
+            () => {
+              revoked.current = true;
+              setRevokeOpen(false);
+            },
+          )
+        }
+        onClosed={onRevokeClosed}
       />
       <Toast message={toast.message} tone={toast.tone} />
     </>

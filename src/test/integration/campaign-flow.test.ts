@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { User } from "@/generated/prisma/client";
 import {
   APPLICATION_REASONS,
@@ -69,7 +69,12 @@ async function feedLabels(user: User): Promise<Map<string, string>> {
 
 describe("campaign flow across resume, matching, campaign, applications and outreach", () => {
   beforeEach(async () => {
+    // A fixed weekday clock (Wed 2026-11-11, 12:00 New York) keeps week and end-date logic deterministic.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-11T17:00:00Z"), shouldAdvanceTime: true });
     await resetDb();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("scores every open job from the uploaded TXT resume, ranking SWE roles above sales", async () => {

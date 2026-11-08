@@ -18,3 +18,17 @@ export function effectiveCampaignStatus(
 ): EffectiveCampaignStatus {
   return status === "active" && endsOn !== null && isPastEnd(endsOn, now, timeZone) ? "ended" : status;
 }
+
+export type ConsentStatus = "active" | "paused" | "ended";
+
+/** The state the campaign page shows: null with no rules in force or for a revoked campaign. */
+export function consentStatus(
+  stored: EffectiveCampaignStatus | null,
+  endsOn: string | null,
+  now: Date,
+  timeZone: string,
+): ConsentStatus | null {
+  if (!stored || stored === "revoked") return null;
+  if (stored === "ended") return "ended";
+  return effectiveCampaignStatus(stored, endsOn, now, timeZone) === "ended" ? "ended" : stored;
+}

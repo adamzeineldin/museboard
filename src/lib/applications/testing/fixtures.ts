@@ -89,9 +89,10 @@ export function baseRules(world: World, overrides: Partial<CampaignRules> = {}):
   };
 }
 
-export async function approveRules(world: World, overrides: Partial<CampaignRules> = {}) {
-  const version = await proposeVersion(world.user.id, baseRules(world, overrides), "web");
-  return approveVersion(world.user.id, version.id, "web");
+/** Propose and approve rules. Pass `now` when the rules hold a fixed endsOn, so the fixture never expires. */
+export async function approveRules(world: World, overrides: Partial<CampaignRules> = {}, now: Date = new Date()) {
+  const version = await proposeVersion(world.user.id, baseRules(world, overrides), "web", now);
+  return approveVersion(world.user.id, version.id, "web", now);
 }
 
 export async function auditFor(userId: string, action: string) {

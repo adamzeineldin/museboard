@@ -44,6 +44,10 @@ function failure(scope: string, userId: string, error: unknown): CampaignActionR
 type ProposedRules = Parameters<typeof proposeRules>[1];
 
 const NOTHING_CHANGED: CampaignActionResult = { ok: true, message: "Nothing changed. These rules are already in force." };
+const PENDING_WITHDRAWN: CampaignActionResult = {
+  ok: true,
+  message: "Pending changes dropped. Your approved rules stay in force.",
+};
 
 /** Save the form as a new pending version without approving it. */
 export async function saveRulesAction(input: unknown): Promise<CampaignActionResult> {
@@ -54,6 +58,7 @@ export async function saveRulesAction(input: unknown): Promise<CampaignActionRes
     const { outcome } = await proposeRules(userId, input as ProposedRules, "web");
     if (outcome === "unchanged_in_force") return NOTHING_CHANGED;
     refresh();
+    if (outcome === "withdrawn_pending") return PENDING_WITHDRAWN;
     return { ok: true, message: "Saved. These rules aren't in force until you approve them." };
   } catch (error) {
     return failure("save", userId, error);
@@ -80,14 +85,20 @@ function readApproveForm(formData: FormData): { versionId: string; rules: unknow
  * Which version to approve so that what the user saw is exactly what goes into force: the displayed
  * version when the submitted rules are its stored rules (approveVersion refuses it as stale if a newer
  * proposal replaced it meanwhile), else the form's unsaved edits, saved as a new version first.
- * Returns null when the rules are already in force and nothing is pending.
+ * Returns the result to report instead when the rules are already in force (a pending version, if any,
+ * is withdrawn).
  */
-async function approvalTarget(userId: string, versionId: string, rules: unknown): Promise<string | null> {
+async function approvalTarget(userId: string, versionId: string, rules: unknown): Promise<string | CampaignActionResult> {
   const shown = versionId ? await findOwnVersion(userId, versionId) : null;
   const submitted = parseCampaignRules(rules);
   if (shown && submitted && !shown.approvedAt && rulesEqual(submitted, parseCampaignRules(shown.rules))) return shown.id;
   const proposal = await proposeRules(userId, rules as ProposedRules, "web");
-  return proposal.outcome === "unchanged_in_force" ? null : proposal.version.id;
+  if (proposal.outcome === "unchanged_in_force") return NOTHING_CHANGED;
+  if (proposal.outcome === "withdrawn_pending") {
+    refresh();
+    return PENDING_WITHDRAWN;
+  }
+  return proposal.version.id;
 }
 
 /** Approve exactly the rules whose summary the form displayed. */
@@ -99,7 +110,7 @@ export async function approveRulesAction(formData: FormData): Promise<CampaignAc
   try {
     const hadRulesInForce = Boolean((await getCampaignState(userId)).inForce);
     const target = await approvalTarget(userId, form.versionId, form.rules);
-    if (!target) return NOTHING_CHANGED;
+    if (typeof target !== "string") return target;
     await approveVersion(userId, target, "web");
     refresh();
     return { ok: true, message: hadRulesInForce ? "New rules approved" : "Campaign approved" };

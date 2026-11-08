@@ -99,6 +99,24 @@ describe("campaign actions", () => {
     expect(await db.campaignVersion.count()).toBe(1);
   });
 
+  it("saving the rules in force while changes are pending withdraws the pending version", async () => {
+    const { user, rules } = await setup();
+    await approveRulesAction(approveForm(null, rules));
+    const pending = await proposeVersion(user.id, { ...rules, weeklyCap: 8 }, "web");
+    vi.clearAllMocks();
+    const withdrawn = { ok: true, message: "Pending changes dropped. Your approved rules stay in force." };
+    expect(await saveRulesAction(rules)).toEqual(withdrawn);
+    expect((await getCampaignState(user.id)).pending).toBeNull();
+    expect(revalidatePath).toHaveBeenCalledWith("/campaign");
+
+    const again = await proposeVersion(user.id, { ...rules, weeklyCap: 9 }, "web");
+    expect(await approveRulesAction(approveForm(again.id, rules))).toEqual(withdrawn);
+    const state = await getCampaignState(user.id);
+    expect(state.pending).toBeNull();
+    expect(state.rulesInForce).toEqual(rules);
+    expect(await db.campaignVersion.findUniqueOrThrow({ where: { id: pending.id } })).toMatchObject({ approvedAt: null });
+  });
+
   it("does not approve another user's version id", async () => {
     const { rules } = await setup();
     const other = await createTestUser();

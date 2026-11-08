@@ -67,8 +67,8 @@ export async function approveWaiting(userId: string, applicationId: string, now:
   return updated ?? settledOrThrow(userId, application.id, isUserApproved, "approved");
 }
 
-/** Waiting -> skipped, decided by the user. */
-export async function skipWaiting(userId: string, applicationId: string): Promise<Application> {
+/** Waiting -> skipped, decided by the user. `now` stamps decidedAt. */
+export async function skipWaiting(userId: string, applicationId: string, now: Date = new Date()): Promise<Application> {
   const application = await loadOwnedApplication(userId, applicationId);
   if (isSkipped(application)) return application;
   if (application.status !== "waiting") throw notWaiting("skipped");
@@ -76,7 +76,7 @@ export async function skipWaiting(userId: string, applicationId: string): Promis
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "waiting" },
-      data: { status: "skipped", decidedBy: "user", reason: APPLICATION_REASONS.skippedByYou, decidedAt: new Date(), packetReleasedAt: null },
+      data: { status: "skipped", decidedBy: "user", reason: APPLICATION_REASONS.skippedByYou, decidedAt: now, packetReleasedAt: null },
     });
     if (count === 0) return null;
     const row = await tx.application.findUniqueOrThrow({ where: { id: application.id } });

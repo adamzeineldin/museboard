@@ -218,6 +218,78 @@ describe("prepareApplication", () => {
     expect(event.payload).toMatchObject({ ok: false, reason: "Upload a resume first", jobId: world.jobs.stripe.id });
   });
 
+  it("audits the refusal when the posting has closed", async () => {
+    const world = await createWorld({ jobs: [{ key: "closed", company: "Stripe", score: 90, closed: true }] });
+    await expect(prepareApplication(world.user.id, world.jobs.closed.id, "muse", NOW)).rejects.toMatchObject({ code: "closed" });
+    const [event] = await auditFor(world.user.id, "application.blocked");
+    expect(event).toMatchObject({
+      actor: "muse",
+      payload: { jobId: world.jobs.closed.id, company: "Stripe", ok: false, reason: "This posting has closed." },
+    });
+    expect(await db.application.count()).toBe(0);
+  });
+
+  it("checks against the campaign as it is inside the transaction, not as read before it", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    const original = db.$transaction.bind(db);
+    // A pause that commits after the context was loaded but before the decision's transaction starts.
+    const spy = vi.spyOn(db, "$transaction").mockImplementationOnce((async (...args: Parameters<typeof db.$transaction>) => {
+      await setCampaignStatus(world.user.id, "paused");
+      return original(...args);
+    }) as typeof db.$transaction);
+    try {
+      const app = await prepareApplication(world.user.id, world.jobs.stripe.id, "inroad", NOW);
+      expect(app).toMatchObject({ status: "waiting", reason: "Campaign is paused", packet: null });
+      const [event] = await auditFor(world.user.id, "application.prepared");
+      expect(event.payload).toMatchObject({ ok: false, reason: "Campaign is paused" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("uses the resume of the campaign in force inside the transaction, matching campaignVersionId", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    const campaignResume = await db.resume.create({ data: { userId: world.user.id, filename: "Campaign.pdf", storageKey: "c" } });
+    const original = db.$transaction.bind(db);
+    let approvedId = "";
+    // A new version naming another resume commits after the resumes were picked but before the transaction starts.
+    const spy = vi.spyOn(db, "$transaction").mockImplementationOnce((async (...args: Parameters<typeof db.$transaction>) => {
+      approvedId = (await approveRules(world, { resumeId: campaignResume.id })).id;
+      return original(...args);
+    }) as typeof db.$transaction);
+    try {
+      const app = await prepareApplication(world.user.id, world.jobs.stripe.id, "inroad", NOW);
+      expect(app).toMatchObject({ status: "prepared", campaignVersionId: approvedId, resumeId: campaignResume.id });
+      expect(parseApplicationPacket(app.packet)?.resume).toMatchObject({ id: campaignResume.id, filename: "Campaign.pdf" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("falls back to the default resume when the version in force inside the transaction names no resume", async () => {
+    const world = await createWorld();
+    const resumeA = await db.resume.create({ data: { userId: world.user.id, filename: "A.pdf", storageKey: "a" } });
+    await approveRules(world, { resumeId: resumeA.id });
+    const gone = await db.resume.create({ data: { userId: world.user.id, filename: "Gone.pdf", storageKey: "g" } });
+    const original = db.$transaction.bind(db);
+    let approvedId = "";
+    // After resume A was picked, a version whose resume no longer exists comes into force before the transaction.
+    const spy = vi.spyOn(db, "$transaction").mockImplementationOnce((async (...args: Parameters<typeof db.$transaction>) => {
+      approvedId = (await approveRules(world, { resumeId: gone.id })).id;
+      await db.resume.delete({ where: { id: gone.id } });
+      return original(...args);
+    }) as typeof db.$transaction);
+    try {
+      const app = await prepareApplication(world.user.id, world.jobs.stripe.id, "inroad", NOW);
+      expect(app).toMatchObject({ status: "prepared", campaignVersionId: approvedId, resumeId: world.resume.id });
+      expect(parseApplicationPacket(app.packet)?.resume).toMatchObject({ id: world.resume.id });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("rejects unknown jobs, closed postings and bad actors", async () => {
     const world = await createWorld({ jobs: [{ key: "closed", company: "Stripe", score: 90, closed: true }] });
     await expect(prepareApplication(world.user.id, "nope", "user", NOW)).rejects.toThrow("We couldn't find that job.");

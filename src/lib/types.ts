@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeCompanyName } from "./company-name";
 
 // Enum-like fields are plain Strings in the database (portable between SQLite and Postgres).
 // These unions and schemas are the single source of truth for their allowed values.
@@ -49,6 +50,8 @@ export const MIN_MATCH_MIN = 50;
 export const MIN_MATCH_MAX = 100;
 const MAX_COMPANIES = 200;
 const MAX_COMPANY_NAME = 120;
+/** Matches the MCP id bound (src/mcp/schemas.ts ID_MAX). */
+const MAX_RESUME_ID = 200;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -71,14 +74,14 @@ export const CampaignRulesSchema = z
     roles: z.array(jobTypeSchema).min(1, "Pick at least one role type").transform(unique),
     autoCompanies: companyListSchema,
     askFirstCompanies: companyListSchema,
-    resumeId: z.string().trim().min(1, "Pick a resume"),
+    resumeId: z.string().trim().min(1, "Pick a resume").max(MAX_RESUME_ID, "Resume id is too long"),
     weeklyCap: z.number().int().min(WEEKLY_CAP_MIN).max(WEEKLY_CAP_MAX),
     minMatch: z.number().int().min(MIN_MATCH_MIN).max(MIN_MATCH_MAX),
     endsOn: z.string().refine(isIsoCalendarDate, "Use a real date in YYYY-MM-DD form"),
   })
   .superRefine((rules, ctx) => {
-    const auto = new Set(rules.autoCompanies.map((name) => name.toLowerCase()));
-    const overlap = rules.askFirstCompanies.filter((name) => auto.has(name.toLowerCase()));
+    const auto = new Set(rules.autoCompanies.map(normalizeCompanyName));
+    const overlap = rules.askFirstCompanies.filter((name) => auto.has(normalizeCompanyName(name)));
     if (overlap.length > 0) {
       ctx.addIssue({
         code: "custom",

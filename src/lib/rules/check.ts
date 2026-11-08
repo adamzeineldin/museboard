@@ -1,13 +1,12 @@
+import { normalizeCompanyName } from "@/lib/company-name";
 import { localDateString } from "./time";
 import { RULE_REASONS, type RuleCampaign, type RuleCheckResult, type RuleJob, type RuleMatch } from "./types";
 
 // Brief sec. 4: the rule check. Pure; checks run in order and the first failure wins.
 // Numeric comparisons are written to fail closed: a NaN score or weekCount never passes.
 
-const normalizeCompany = (name: string): string => name.trim().toLowerCase();
-
 const listIncludes = (companies: readonly string[], normalized: string): boolean =>
-  companies.some((company) => normalizeCompany(company) === normalized);
+  companies.some((company) => normalizeCompanyName(company) === normalized);
 
 const fail = (reason: string): RuleCheckResult => ({ ok: false, reason });
 
@@ -34,7 +33,7 @@ export function checkApplication(
   // endsOn is inclusive: the campaign runs through the end of that day in the user's zone.
   if (localDateString(now, campaign.timeZone) > rules.endsOn) return fail(RULE_REASONS.ended);
 
-  const company = normalizeCompany(job.companyName);
+  const company = normalizeCompanyName(job.companyName);
   if (listIncludes(rules.askFirstCompanies, company)) {
     return { ok: false, reason: RULE_REASONS.topChoice, topChoice: true };
   }

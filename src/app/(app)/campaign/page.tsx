@@ -4,6 +4,7 @@ import { formatDateTime } from "@/components/campaign/format";
 import { listCompanies } from "@/components/campaign/form-model";
 import { VersionHistory, type VersionHistoryRow } from "@/components/campaign/VersionHistory";
 import { getCampaignHistory, getCampaignState, type VersionHistoryEntry } from "@/lib/campaign";
+import { consentStatus } from "@/lib/campaign/ended";
 import { requireUser } from "@/lib/current-user";
 import { db } from "@/lib/db";
 import { addDaysToIsoDate, localDateString } from "@/lib/rules";
@@ -54,9 +55,11 @@ export default async function CampaignPage() {
   ]);
 
   const pendingRules = state.pending ? parseCampaignRules(state.pending.rules) : null;
-  const today = localDateString(new Date(), user.timezone);
+  const now = new Date();
+  const today = localDateString(now, user.timezone);
   const status = state.inForce ? campaignStatusSchema.catch("paused").parse(state.campaign?.status) : null;
-  const liveStatus = status === "active" || status === "paused" ? status : null;
+  // An active campaign whose end date has passed reads "Ended" (nothing more is prepared under it).
+  const liveStatus = consentStatus(status, state.rulesInForce?.endsOn ?? null, now, user.timezone);
 
   return (
     <>

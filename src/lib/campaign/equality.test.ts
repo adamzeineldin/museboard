@@ -16,6 +16,10 @@ describe("rulesEqual", () => {
     expect(rulesEqual(rules, { ...rules, roles: ["newgrad", "intern"], autoCompanies: ["datadog", "STRIPE"] })).toBe(true);
   });
 
+  it("ignores extra whitespace inside company names", () => {
+    expect(rulesEqual({ ...rules, autoCompanies: ["Capital One"] }, { ...rules, autoCompanies: [" Capital  One "] })).toBe(true);
+  });
+
   it("detects any changed field", () => {
     expect(rulesEqual(rules, { ...rules, weeklyCap: 4 })).toBe(false);
     expect(rulesEqual(rules, { ...rules, askFirstCompanies: [] })).toBe(false);

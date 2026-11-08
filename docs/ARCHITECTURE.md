@@ -28,7 +28,7 @@ src/lib/connector/          connector tokens (create, verify, list, revoke) + Se
 src/mcp/                    createInroadMcpServer({ userId, scope, now? }), tool definitions, /mcp HTTP pipeline, CLI
 src/app/pause, src/app/digest/unsubscribe   signed-out pages behind the digest's signed links
 scraper/                    Python package (stdlib only). `python -m scraper` prints jobs JSON. unittest in scraper/tests
-worker/                     TS: run scraper, upsert jobs, close missing, recompute matches; node-cron schedule (6h) + weekly digest
+worker/                     TS: run scraper, upsert jobs, close missing, recompute matches, delete expired sign-in links; node-cron schedule (6h) + weekly digest
 e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA) in light + dark, auth (milestone 8)
 ```
 
@@ -37,11 +37,15 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - Immutable updates; small files (<400 lines typical); explicit error handling; zod validation at every boundary
   (server actions, route handlers, MCP tool inputs, CSV rows, scraper JSON).
 - SQLite for local dev (`DATABASE_URL="file:./dev.db"`); schema must stay Postgres-compatible (no SQLite-only tricks).
+  `DATABASE_URL` is SQLite only for now: `createPrismaClient` (`src/lib/prisma-client.ts`) throws on anything but a
+  `file:` URL. Moving to Postgres is marked `TODO(postgres)` there and in `src/lib/serialized-adapter.ts`.
   Enum-like fields are `String` with the allowed values validated in TS (`src/lib/types.ts` exports the unions).
 - Every application Inroad prepares writes an `AuditEvent` with the rule-check result and reason (ground rule 6).
   State changes on the consent path (campaign propose/approve/pause/resume/revoke; application prepare, approve, skip,
   submit) write their audit row with the transaction client (`writeAudit(..., tx)`), so the change and its audit commit
-  or roll back together. Expected refusals inside those transactions return a result and are thrown after it resolves.
+  or roll back together. In `src/lib/applications`, expected refusals inside those transactions return a result and are
+  thrown after it resolves. Campaign services (`approveVersion`, `setCampaignStatus`) throw `CampaignError` inside the
+  transaction, which rolls it back, so nothing written there before the throw (an audit row included) survives.
 - One SQLite connection serves every request in a process (`PrismaBetterSqlite3`). Its own mutex only serializes
   interactive transactions, so a plain query from another request would run inside an open `BEGIN` (and vanish with its
   rollback). `src/lib/serialized-adapter.ts` wraps the adapter so top-level queries and transactions share one lock.
@@ -49,6 +53,10 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - Outreach is never sent by Inroad. No feature offers rewards for referrals. Nothing scrapes social media,
   LinkedIn, Meta Careers or Google Careers. Job data comes only from Greenhouse, Lever, Ashby and Workday public job-board APIs.
 - Companies with no public ATS feed (e.g. Meta, Google in the seed) have `ats = null` and are never scraped.
+- Scraper failure rule: a company fails, and the ingest leaves its jobs untouched (nothing updated or closed), when the
+  fetch raises or at least one posting failed and none parsed. Workday also fails a company whose listing is incomplete:
+  a page comes back empty before the reported total, the first page has no usable total, the listing is cut off at
+  `max_pages`, or there are more candidates than `max_details` (see `scraper/ats/workday.py`).
 - Prototype classes in `src/app/styles/components.css` must not share a name with a Tailwind utility: utilities win, and
   Tailwind generates one whenever the name appears in markup (the prototype's `.ring` became `.match-ring`, `.inline`
   became `.inline-fields`). Prototype classes reused with different meanings are scoped (the campaign toggle is `.opts .co`).
@@ -64,7 +72,11 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - `Contact.email String?`, `Contact.createdAt`.
 - `CampaignVersion.approvedBy String?` (userId), index on (campaignId, createdAt).
 - `ConnectorToken { id, userId, name, tokenHash @unique, scope ('read'|'write'), createdAt, lastUsedAt?, revokedAt? }`.
-- `User.digestOptOut Boolean @default(false)`; Auth.js `Account`, `Session`, `VerificationToken`.
+  The Muse panel shows Connected only for an unrevoked token that has been used (`lastUsedAt` set); an unrevoked one
+  that was never used reads "Not used yet" (`src/components/shell/muse-connection.ts`).
+- `User.digestOptOut Boolean @default(false)`; Auth.js `Account`, `Session`, `VerificationToken`. Auth.js only deletes a
+  `VerificationToken` when its link is used, so each scheduled worker pass deletes expired rows, even when the scrape
+  failed (`deleteExpiredVerificationTokens`, `src/lib/auth-cleanup.ts`).
 - One active campaign per user: `Campaign.userId @unique` is NOT used; instead the service layer guarantees at most one
   campaign with status in ('active','paused') per user.
 
@@ -74,10 +86,13 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - `waiting` — rule check failed; the user must Approve or Skip. `reason` is the failing check's reason.
   Re-preparing a waiting row (`prepareApplication`, e.g. Muse's `prepare_application`) re-runs the check inside a
   transaction that only writes while the row is still `waiting` (a concurrent Skip/Approve wins): a pass promotes it to
-  `prepared`/`campaign` with the **campaign's resume** (`pickResume`: the version in force's `resumeId`, else the default)
-  and a packet built for it; a failure with a different reason or top-choice flag updates `reason`, `checkResult` and
+  `prepared`/`campaign` with the **campaign's resume** (the version in force's `resumeId`, else the default) and a packet
+  built for it; a failure with a different reason or top-choice flag updates `reason`, `checkResult` and
   `campaignVersionId` (still waiting), audits `application.prepared` (`recheck: true`) and, for a top choice, drafts the
   referral ask. The same failure again changes nothing. Rows the user approves keep their own resume.
+  `prepareApplication` re-reads the campaign inside its transaction, so a pause or approval that committed after the
+  first read is not missed. If the version in force then names a different resume, the resume is picked again inside the
+  transaction, so `campaignVersionId` and `resumeId` always come from the same version.
 - Closed postings (`Job.closedAt` set by the ingest): `prepareApplication` refuses them (`ApplicationError('closed')`,
   "This posting has closed.") whether or not a waiting row exists, `approveWaiting` refuses them, and the release check
   (`getSubmissionPacket`, `checkRelease`, `getReleaseVerdicts`) refuses every prepared row on a closed job, user-approved
@@ -97,6 +112,8 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 `weekCount(userId, now, tz)` counts this user's applications in the current ISO week (Monday 00:00 in the user's
 timezone) that are **committed to go out**: `submitted` (by `submittedAt`) plus `prepared` (by `decidedAt`).
 Counting `prepared` is deliberate: otherwise one weekly pass could clear 20 jobs before any is submitted and blow the cap.
+The zone is `User.timezone`. Changing it in Settings takes effect at once: it moves the current ISO week window and the
+day `endsOn` counts through (inclusive, in the new zone).
 When re-checking a specific **campaign-prepared** application at release time (`getSubmissionPacket`, and the web via
 `getReleaseVerdicts`/`checkRelease`), the count is the rows ranked ahead of it (`countAhead` in `week-count.ts`): this
 week's submitted rows, every row the user approved this week, and the campaign-prepared rows decided this week before it
@@ -111,12 +128,17 @@ week, excluding itself. User-approved rows are always releasable.
 - A version's rules are **immutable once created**. Every proposal (web Save or Approve with unsaved edits, or
   `propose_campaign`) creates a NEW version, and the previous pending version gets `supersededAt = now`. So a summary
   shown for a `versionId` always describes exactly what approving that id would put in force.
-  - Rules equal (`rulesEqual`: list order and company-name case ignored) to the current pending version: that version is
-    returned unchanged (no churn, no `campaign.proposed` entry).
-  - Rules equal to the version in force with nothing pending: a no-op that returns the version in force ("nothing changed").
-- `proposeRules(userId, rules, via, now?) => { version, outcome: 'created'|'unchanged_pending'|'unchanged_in_force',
-  supersededVersionId }`; `proposeVersion` is the contract wrapper returning `version`. `campaign.proposed` records
-  `supersededVersionId`.
+  - `rulesEqual` ignores list order and the case and spacing of names (`normalizeCompanyName`).
+  - Rules equal to the current pending version: that version is returned unchanged (no churn, no `campaign.proposed`
+    entry). Outcome `unchanged_pending`.
+  - Rules equal to the version in force are accepted even after their end date (no new rules are written):
+    - with nothing pending, a no-op that returns the version in force. Outcome `unchanged_in_force`.
+    - with a version pending, that version is superseded (withdrawn), the version in force is returned, and
+      `campaign.proposal_withdrawn` is audited. Outcome `withdrawn_pending`.
+  - Any other rules whose end date has passed are refused ("The end date has already passed.").
+- `proposeRules(userId, rules, via, now?) => { version, outcome: 'created'|'unchanged_pending'|'unchanged_in_force'|
+  'withdrawn_pending', supersededVersionId }`; `proposeVersion` is the contract wrapper returning `version`.
+  `campaign.proposed` records `supersededVersionId`.
 - Approve = set `approvedAt` (+ `approvedVia`) on `versionId`, which must be the **current pending version**. Any other
   unapproved id (superseded, or older than the version in force) throws `CampaignError('stale_version')`: "These rules
   changed after you reviewed them. Review the latest summary and approve again." Nothing is approved.
@@ -127,6 +149,9 @@ week, excluding itself. User-approved rows are always releasable.
 - Version history labels: In force, Pending, Replaced (approved, then a newer approval), Replaced before approval
   (`supersededAt`), Never approved (legacy rows).
 - Pause/Resume/Revoke change `Campaign.status`.
+- Effective status: an `active` campaign whose `endsOn` has passed (in the user's zone) displays as ended in
+  `get_campaign` and on the web; the stored status stays `active`. `checkApplication` already refuses it with
+  "Campaign has ended".
 - Revoked/ended campaigns are terminal; a new campaign starts with a fresh first version.
 
 ## Cross-module function contract (implementers must keep these signatures)
@@ -209,7 +234,9 @@ ApplicationPacket = ReferralPacket & { applyUrl, answers: { fullName, email, sch
 
 ## Weekly pass candidates
 "New matches" for `runWeeklyPass` = open jobs (closedAt null) with a Match for the user, no Application yet,
-company in `autoCompanies` or `askFirstCompanies`, type in `roles`, score >= `minMatch`. Each goes through
+company in `autoCompanies` or `askFirstCompanies` (compared with `normalizeCompanyName`, as `checkApplication` does),
+type in `roles`, score >= `minMatch`. A posting that closes mid-pass is refused (audited `application.blocked`) and
+skipped, not counted as failed. Each goes through
 `prepareApplication`: ok -> `prepared`; failure (top choice, weekly limit) -> `waiting` with the reason; top choice also
 creates a `referral_ask` draft for `bestContactAt` (if any, and no draft already exists for that contact+job).
 Jobs outside the campaign are not turned into applications by the pass; the Jobs feed still shows their held reason
@@ -222,7 +249,7 @@ getReleaseVerdicts(userId, now?): Promise<Map<applicationId, { allowed, reason }
 checkRelease(userId, applicationId, now?): Promise<{ allowed, reason }>             // read-only
 getSubmissionPacket(...)                                                           // same verdict, plus the packet; audits application.packet_requested; sets packetReleasedAt when allowed
 recordSubmission(userId, applicationId, actor, confirmationText?, now?)            // release gate inside the service (see Application lifecycle)
-approveWaiting(userId, applicationId, now?)                                        // optional now (tests)
+approveWaiting(userId, applicationId, now?); skipWaiting(userId, applicationId, now?)   // optional now stamps decidedAt
 getActivity(...).items[].release: { allowed, reason } | null                       // Activity shows a refused prepared row as "Held: <reason>"
 // The Jobs card chip and find_roles use the same verdicts: a refused prepared row is "Held: <reason>" (find_roles status 'held').
 // src/lib/connector
@@ -238,13 +265,37 @@ signLinkToken / verifyLinkToken                   // HMAC-SHA256, key derived fr
 setDigestEnabled(userId, enabled) => { enabled, changed }   // Settings "Weekly digest" switch (User.digestOptOut)
 ```
 Audit actions added: `muse.<tool>` (actor muse, every tool call incl. failures, non-sensitive args + summary),
-`connector.token_created`, `connector.token_revoked`, `digest.sent` (actor inroad; payload weekStart, used to skip re-sends),
+`connector.token_created`, `connector.token_revoked`, `digest.sent` (actor inroad; payload weekStart, weekEnd and the
+counts submitted, ready, held, waiting, referralDrafts, plus campaign; weekStart is used to skip re-sends),
+`digest.sending` (actor inroad, `{ weekStart }`; the claim, written in a transaction before each send),
+`digest.send_failed` (actor inroad, `{ weekStart, error }`; releases the claim so the next run retries),
 `campaign.paused_via_email` (actor user, in addition to the service's `campaign.paused`), `digest.unsubscribed_via_email`,
-`digest.preference_changed` (actor user, `{ enabled, via: 'settings' }`, only on a change).
+`digest.preference_changed` (actor user, `{ enabled, via: 'settings' }`, only on a change),
+`profile.updated` (actor user, `{ fields: ['timezone'], from, to }`, only on a change).
+
+- Digest claim (`src/lib/digest/send-claim.ts`): a week is taken when it has a `digest.sent` row, or more `digest.sending`
+  than `digest.send_failed` rows. So overlapping runs never send twice, and a run that crashes mid-send is not retried
+  automatically (a missed digest is better than a duplicate).
+- Digest "Ready to submit" applies `getReleaseVerdicts`: only prepared rows the release check allows now are listed as
+  ready. Held rows (paused campaign, closed posting, over the cap) are never listed as ready: they get their own
+  "Not going out right now" section with the reason, and a digest with only held rows is still sent.
+- Muse panel: one row per tool call, from the `muse.<tool>` audits, shown as `inroad.<tool>`; a call whose audit payload
+  has `ok: false` is marked failed.
 
 CLI: `npm run mcp:token -- <email> [--scope read|write] [--name ...]` (prints a token once), `npm run digest:once`.
 `/mcp`, `/.well-known/oauth-protected-resource`, `/pause` and `/digest/*` are public (no session); `/pause` and `/digest`
 are listed in `PUBLIC_TOKEN_PREFIXES` (src/lib/protected-routes.ts).
+
+## Profile, resumes and sign-in
+- Time zone: Settings edits it with `updateTimeZoneAction` (`src/app/(app)/settings/profile-actions.ts`), which audits
+  `profile.updated`. Onboarding is one-time: once the profile is complete, the onboarding action refuses a re-submission
+  (redirects to `/jobs`) so it cannot rewrite the time zone.
+- Resumes: at most `MAX_RESUMES_PER_USER` (10) per user; `uploadResume` throws `ResumeError('limit_reached')` past it.
+- Magic links are rate limited per email (3 per 10 minutes) and per client IP (20 per 10 minutes)
+  (`src/lib/auth-rate-limit.ts`, in memory, one process). Both limits apply on the sign-in action and on the Auth.js
+  route (`/api/auth/...`). There is no process-wide cap, so one sender cannot lock everyone out. The client IP is the
+  first `X-Forwarded-For` hop, so the per-client limit only means something behind a reverse proxy that overwrites that
+  header; the per-email limit holds either way. A limited request lands on the same "check your email" page.
 
 Packet notes (`ApplicationPacket.notes`) are worded about "the applicant", so the same line reads naturally on the web
 (shown to the applicant under "Inroad leaves these to you") and to Muse (which asks them).

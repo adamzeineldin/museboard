@@ -90,6 +90,7 @@ describe("CampaignRulesSchema", () => {
     ["endsOn wrong format", { endsOn: "12/15/2026" }],
     ["endsOn impossible date", { endsOn: "2026-02-30" }],
     ["empty resumeId", { resumeId: "" }],
+    ["resumeId longer than 200 characters", { resumeId: "r".repeat(201) }],
     ["empty company name", { autoCompanies: ["  "] }],
     ["company both auto and ask-first", { askFirstCompanies: ["Stripe"] }],
     ["unknown key", { extra: true }],
@@ -105,6 +106,15 @@ describe("CampaignRulesSchema", () => {
   it("treats auto/ask-first overlap case-insensitively", () => {
     const result = CampaignRulesSchema.safeParse({ ...validRules, askFirstCompanies: ["stripe"] });
     expect(result.success).toBe(false);
+  });
+
+  it("treats auto/ask-first overlap the way company names are compared (runs of spaces collapse)", () => {
+    const result = CampaignRulesSchema.safeParse({ ...validRules, askFirstCompanies: ["capital  one"] });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a resumeId of 200 characters", () => {
+    expect(CampaignRulesSchema.safeParse({ ...validRules, resumeId: "r".repeat(200) }).success).toBe(true);
   });
 });
 

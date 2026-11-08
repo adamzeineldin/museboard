@@ -1,5 +1,6 @@
 import "server-only";
 import { writeAudit } from "@/lib/audit";
+import { normalizeCompanyName } from "@/lib/company-name";
 import { db } from "@/lib/db";
 import { localDateString, RULE_REASONS, type RuleCampaign } from "@/lib/rules";
 import type { Actor, CampaignRules } from "@/lib/types";
@@ -30,7 +31,7 @@ interface Candidate {
  * Best matches first, so the weekly cap goes to the strongest roles.
  */
 async function findCandidates(userId: string, rules: CampaignRules): Promise<Candidate[]> {
-  const companies = new Set([...rules.autoCompanies, ...rules.askFirstCompanies].map((n) => n.trim().toLowerCase()));
+  const companies = new Set([...rules.autoCompanies, ...rules.askFirstCompanies].map(normalizeCompanyName));
   const jobs = await db.job.findMany({
     where: {
       closedAt: null,
@@ -41,7 +42,7 @@ async function findCandidates(userId: string, rules: CampaignRules): Promise<Can
     include: { company: true, matches: { where: { userId }, select: { score: true } } },
   });
   return jobs
-    .filter((job) => companies.has(job.company.name.trim().toLowerCase()))
+    .filter((job) => companies.has(normalizeCompanyName(job.company.name)))
     .map((job) => ({ job, score: job.matches[0]?.score ?? 0 }))
     .sort((a, b) => b.score - a.score || a.job.firstSeenAt.getTime() - b.job.firstSeenAt.getTime() || a.job.id.localeCompare(b.job.id))
     .map(({ job }) => ({ id: job.id, label: roleLabel(job.company.name, job.title) }));
@@ -74,6 +75,8 @@ async function prepareAll(userId: string, actor: Actor, now: Date, candidates: C
       if (outcome.referralDraftFor) summary.referralDrafts.push(candidate.label);
     } catch (error) {
       if (isApplicationError(error) && error.code === "no_resume") return { ...summary, reason: error.message };
+      // The posting closed after the candidates were read: an expected refusal (audited by prepare), not a failure.
+      if (isApplicationError(error) && error.code === "closed") continue;
       console.error("[applications] weekly pass: prepare failed", { userId, jobId: candidate.id, error: errorMessage(error) });
       summary.failed.push(candidate.label);
     }

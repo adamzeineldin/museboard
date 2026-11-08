@@ -102,9 +102,7 @@ describe("release check (web and Muse parity)", () => {
 
   it("a submitted row still counts: the held row stays held after the other one is submitted", async () => {
     const { world, stripe, datadog } = await overCapWorld();
-    await recordSubmission(world.user.id, stripe.id, "user");
-    // recordSubmission stamps the wall clock; move it into the fixed test week.
-    await db.application.update({ where: { id: stripe.id }, data: { submittedAt: NOW } });
+    await recordSubmission(world.user.id, stripe.id, "user", undefined, NOW);
     expect(await checkRelease(world.user.id, datadog.id, NOW)).toEqual(LIMIT);
   });
 

@@ -149,6 +149,80 @@ describe("campaign versions", () => {
     expect(await auditActions(user.id)).toEqual(["campaign.proposed", "campaign.approved"]);
   });
 
+  it("reverting to the rules in force while a version is pending withdraws the pending version", async () => {
+    const { user, rules } = await setup();
+    const v1 = await proposeVersion(user.id, rules, "web");
+    await approveVersion(user.id, v1.id, "web");
+    const v2 = await proposeVersion(user.id, { ...rules, weeklyCap: 8 }, "web");
+
+    const result = await proposeRules(user.id, { ...rules, autoCompanies: ["datadog", "stripe"] }, "muse");
+    expect(result).toMatchObject({ outcome: "withdrawn_pending", supersededVersionId: v2.id });
+    expect(result.version.id).toBe(v1.id);
+    expect(await db.campaignVersion.count()).toBe(2);
+    const state = await getCampaignState(user.id);
+    expect(state.pending).toBeNull();
+    expect(state.inForce?.id).toBe(v1.id);
+    expect((await db.campaignVersion.findUniqueOrThrow({ where: { id: v2.id } })).supersededAt).not.toBeNull();
+    await expect(approveVersion(user.id, v2.id, "muse")).rejects.toMatchObject({ code: "stale_version" });
+
+    expect(await auditActions(user.id)).toEqual([
+      "campaign.proposed",
+      "campaign.approved",
+      "campaign.proposed",
+      "campaign.proposal_withdrawn",
+    ]);
+    const withdrawn = await db.auditEvent.findFirstOrThrow({ where: { action: "campaign.proposal_withdrawn" } });
+    expect(withdrawn).toMatchObject({ actor: "muse" });
+    expect(withdrawn.payload).toMatchObject({
+      campaignId: v1.campaignId,
+      versionId: v2.id,
+      inForceVersionId: v1.id,
+      via: "muse",
+      withdrawn: { ...rules, weeklyCap: 8 },
+    });
+  });
+
+  it("withdraws a pending version by saving the rules in force even after their end date has passed", async () => {
+    const { user, rules } = await setup();
+    const ending = { ...rules, endsOn: "2026-11-10" };
+    const proposedAt = new Date("2026-11-07T12:00:00Z");
+    const v1 = await proposeVersion(user.id, ending, "web", proposedAt);
+    await approveVersion(user.id, v1.id, "web", proposedAt);
+    const v2 = await proposeVersion(user.id, { ...ending, endsOn: FAR_FUTURE }, "web", proposedAt);
+
+    const afterEnd = new Date("2026-11-20T12:00:00Z");
+    const result = await proposeRules(user.id, ending, "web", afterEnd);
+    expect(result).toMatchObject({ outcome: "withdrawn_pending", supersededVersionId: v2.id });
+    expect(result.version.id).toBe(v1.id);
+    expect((await getCampaignState(user.id)).pending).toBeNull();
+    await expect(proposeRules(user.id, ending, "web", afterEnd)).resolves.toMatchObject({ outcome: "unchanged_in_force" });
+    await expect(proposeRules(user.id, { ...ending, weeklyCap: 2 }, "web", afterEnd)).rejects.toThrow(
+      "The end date has already passed.",
+    );
+    expect(await db.campaignVersion.count()).toBe(2);
+  });
+
+  it("refuses to approve a pending version of a revoked campaign and leaves it revoked", async () => {
+    const { user, rules } = await setup();
+    const neverApproved = await proposeVersion(user.id, rules, "muse");
+    const first = await setCampaignStatus(user.id, "revoked");
+    await expect(approveVersion(user.id, neverApproved.id, "muse")).rejects.toMatchObject({
+      code: "not_found",
+      message: "We couldn't find that campaign version.",
+    });
+    expect((await db.campaign.findUniqueOrThrow({ where: { id: first.id } })).status).toBe("revoked");
+    expect((await db.campaignVersion.findUniqueOrThrow({ where: { id: neverApproved.id } })).approvedAt).toBeNull();
+
+    const v1 = await proposeVersion(user.id, rules, "web");
+    await approveVersion(user.id, v1.id, "web");
+    const v2 = await proposeVersion(user.id, { ...rules, weeklyCap: 2 }, "muse");
+    const second = await setCampaignStatus(user.id, "revoked");
+    await expect(approveVersion(user.id, v2.id, "muse")).rejects.toMatchObject({ code: "not_found" });
+    expect((await db.campaign.findUniqueOrThrow({ where: { id: second.id } })).status).toBe("revoked");
+    expect((await db.campaignVersion.findUniqueOrThrow({ where: { id: v2.id } })).approvedAt).toBeNull();
+    expect(await db.auditEvent.count({ where: { userId: user.id, action: "campaign.approved" } })).toBe(1);
+  });
+
   it("approving the pending version swaps it in and keeps the campaign status", async () => {
     const { user, rules } = await setup();
     const v1 = await proposeVersion(user.id, rules, "web");

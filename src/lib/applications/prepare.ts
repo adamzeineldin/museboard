@@ -1,12 +1,13 @@
 import "server-only";
 import type { Application, Resume, User } from "@/generated/prisma/client";
-import type { RuleContext } from "@/lib/campaign";
+import { loadRuleCampaign, type RuleContext } from "@/lib/campaign";
 import { writeAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import type { Actor } from "@/lib/types";
 import { isUniqueViolation, parseActorOrThrow, parseIdOrThrow, type DbClient } from "./client";
-import { loadEvalContext, loadJobOrThrow, pickResume, runCheck, toJson, type CheckRun } from "./context";
-import { APPLICATION_REASONS, ApplicationError } from "./errors";
+import { loadEvalContext, loadJobOrThrow, namedResume, runCheck, toJson, type CheckRun } from "./context";
+import { getDefaultResume } from "./deps";
+import { APPLICATION_REASONS, ApplicationError, type ApplicationErrorCode } from "./errors";
 import { buildApplicationPacket, type JobWithCompany } from "./packet";
 import { draftReferralIfNeeded } from "./referral";
 
@@ -32,6 +33,8 @@ type TxResult = { application: Application; check: CheckRun | null; changed: boo
 interface ResumeChoice {
   kept: Resume;
   campaign: Resume;
+  /** What `campaign` is when the campaign names no resume (or names one that is gone). */
+  fallback: Resume;
 }
 
 function decisionData(scope: PrepareScope, check: CheckRun, resume: Resume) {
@@ -91,8 +94,13 @@ async function recheckWaiting(tx: DbClient, scope: PrepareScope, existing: Appli
   return { application, check, changed: true };
 }
 
-/** Inside the transaction: count the week, check, and create or re-check. Serialized so the cap holds. */
-async function decide(tx: DbClient, scope: PrepareScope, existing: Application | null, resumes: ResumeChoice): Promise<TxResult> {
+/**
+ * Inside the transaction: re-read the campaign, count the week, check, and create or re-check. Serialized so
+ * the cap holds, and a pause or approval that committed after the pre-transaction read is not missed.
+ */
+async function decide(tx: DbClient, loaded: PrepareScope, existing: Application | null, picked: ResumeChoice): Promise<TxResult> {
+  const scope: PrepareScope = { ...loaded, rule: await loadRuleCampaign(loaded.user.id, loaded.user.timezone, tx) };
+  const resumes = await repickIfChanged(tx, loaded.rule, scope, picked);
   const check = await runCheck(tx, {
     userId: scope.user.id,
     job: scope.job,
@@ -108,24 +116,36 @@ async function decide(tx: DbClient, scope: PrepareScope, existing: Application |
   return { application, check, changed: true };
 }
 
-async function blockForMissingResume(scope: PrepareScope): Promise<never> {
+/**
+ * If the campaign in force now names a different resume than it did before the transaction, re-pick it with
+ * `tx` so the decision's resume and campaignVersionId agree.
+ */
+async function repickIfChanged(tx: DbClient, before: RuleContext, scope: PrepareScope, resumes: ResumeChoice): Promise<ResumeChoice> {
+  if (scope.rule.rules?.resumeId === before.rules?.resumeId) return resumes;
+  const campaign = (await namedResume(tx, scope.user.id, scope.rule)) ?? resumes.fallback;
+  return { ...resumes, campaign };
+}
+
+/** An expected refusal before any decision: audited as application.blocked, then thrown. */
+async function block(scope: PrepareScope, code: ApplicationErrorCode, reason: string): Promise<never> {
   await writeAudit(scope.user.id, scope.actor, "application.blocked", {
     jobId: scope.job.id,
     company: scope.job.company.name,
     title: scope.job.title,
     ok: false,
-    reason: APPLICATION_REASONS.uploadResume,
+    reason,
   });
-  throw new ApplicationError("no_resume", APPLICATION_REASONS.uploadResume);
+  throw new ApplicationError(code, reason);
 }
 
 /** New rows use the campaign's resume. A waiting row keeps its own unless a campaign decision promotes it. */
 async function resumesFor(existing: Application | null, scope: PrepareScope): Promise<ResumeChoice | null> {
-  const campaign = await pickResume(db, scope.user.id, scope.rule);
-  if (!existing) return campaign ? { kept: campaign, campaign } : null;
+  const defaultResume = await getDefaultResume(scope.user.id);
+  const campaign = (await namedResume(db, scope.user.id, scope.rule)) ?? defaultResume;
+  if (!existing) return campaign ? { kept: campaign, campaign, fallback: defaultResume ?? campaign } : null;
   const kept = await db.resume.findUnique({ where: { id: existing.resumeId } });
   if (!kept) return null;
-  return { kept, campaign: campaign ?? kept };
+  return { kept, campaign: campaign ?? kept, fallback: defaultResume ?? kept };
 }
 
 /** Run the transaction; a concurrent create of the same (userId, jobId) resolves to the winner's row. */
@@ -160,9 +180,9 @@ export async function prepareWithOutcome(
 
   const { user, rule } = await loadEvalContext(db, userId);
   const scope: PrepareScope = { user, job, rule, now, actor: parsedActor };
-  if (job.closedAt) throw new ApplicationError("closed", APPLICATION_REASONS.postingClosed);
+  if (job.closedAt) return block(scope, "closed", APPLICATION_REASONS.postingClosed);
   const resumes = await resumesFor(existing, scope);
-  if (!resumes) return blockForMissingResume(scope);
+  if (!resumes) return block(scope, "no_resume", APPLICATION_REASONS.uploadResume);
 
   const outcome = await decideOnce(scope, existing, resumes);
   if (!outcome.changed) return { application: outcome.application, changed: false, referralDraftFor: null };

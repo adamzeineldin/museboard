@@ -4,7 +4,9 @@ import {
   companyChipModel,
   cycleCompany,
   draftFromRules,
+  draftErrors,
   draftToRules,
+  endsOnError,
   initialDraft,
   listCompanies,
   toggleRole,
@@ -78,6 +80,7 @@ describe("campaign form model", () => {
       canSave: true,
       changed: false,
       label: "Approve campaign",
+      reasons: [],
     });
     expect(approveState(draft, { inForce: rules, pending: null, minEndsOn: "2026-11-08" })).toMatchObject({
       canApprove: false,
@@ -98,5 +101,99 @@ describe("campaign form model", () => {
     expect(approveState({ ...draft, auto: [] }, { inForce: null, pending: null, minEndsOn: "2026-11-08" }).canApprove).toBe(false);
     expect(approveState({ ...draft, roles: [] }, { inForce: null, pending: null, minEndsOn: "2026-11-08" }).canApprove).toBe(false);
     expect(approveState({ ...draft, endsOn: "2026-11-07" }, { inForce: null, pending: null, minEndsOn: "2026-11-08" }).canApprove).toBe(false);
+  });
+
+  it("lets the user save the rules in force over a pending version, which withdraws it", () => {
+    const pending = { ...rules, weeklyCap: 3 };
+    expect(approveState(draft, { inForce: rules, pending, minEndsOn: "2026-11-08" })).toMatchObject({
+      canApprove: false,
+      canSave: true,
+      changed: false,
+    });
+  });
+
+  it("explains why Approve is unavailable", () => {
+    const ctx = { inForce: null, pending: null, minEndsOn: "2026-11-09" };
+    expect(approveState({ ...draft, roles: [], auto: [] }, ctx).reasons).toEqual([
+      "Pick at least one role type.",
+      "Set at least one company to auto-apply.",
+    ]);
+    expect(approveState({ ...draft, weeklyCap: "" }, ctx).reasons).toEqual(["Fix the fields marked above."]);
+    expect(approveState({ ...draft, endsOn: "2026-11-08" }, ctx)).toMatchObject({
+      canApprove: false,
+      reasons: ["Pick an end date after today."],
+    });
+  });
+
+  it("names company-list problems, which have no field marking of their own", () => {
+    const ctx = { inForce: null, pending: null, minEndsOn: "2026-11-09" };
+    expect(approveState({ ...draft, ask: ["Meta", "stripe"] }, ctx)).toMatchObject({
+      canApprove: false,
+      reasons: ["A company can't be both auto-apply and ask first: stripe."],
+    });
+    const many = Array.from({ length: 201 }, (_, i) => `Co ${i}`);
+    expect(approveState({ ...draft, auto: many }, ctx)).toMatchObject({
+      canApprove: false,
+      reasons: ["Pick at most 200 companies to auto-apply."],
+    });
+    expect(approveState({ ...draft, ask: many }, ctx).reasons).toEqual(["Pick at most 200 companies to ask about first."]);
+    expect(approveState({ ...draft, weeklyCap: "", ask: many }, ctx).reasons).toEqual([
+      "Pick at most 200 companies to ask about first.",
+      "Fix the fields marked above.",
+    ]);
+  });
+
+  it("says the rules are already in force when the draft matches them", () => {
+    const pending = { ...rules, weeklyCap: 3 };
+    for (const ctxPending of [null, pending]) {
+      expect(approveState(draft, { inForce: rules, pending: ctxPending, minEndsOn: "2026-11-08" })).toMatchObject({
+        canApprove: false,
+        reasons: ["These rules are already in force. Change a rule to approve new ones."],
+      });
+    }
+  });
+
+  it.each([
+    ["no campaign, complete", draft, null, null],
+    ["no campaign, missing roles", { ...draft, roles: [] }, null, null],
+    ["no campaign, no auto company", { ...draft, auto: [] }, null, null],
+    ["no campaign, bad cap", { ...draft, weeklyCap: "" }, null, null],
+    ["no campaign, bad role value", { ...draft, roles: ["nope" as never] }, null, null],
+    ["no campaign, end date today", { ...draft, endsOn: "2026-11-08" }, null, null],
+    ["no campaign, company in both lists", { ...draft, ask: ["Stripe"] }, null, null],
+    ["no campaign, too many companies", { ...draft, auto: Array.from({ length: 201 }, (_, i) => `Co ${i}`) }, null, null],
+    ["in force, unchanged", draft, rules, null],
+    ["in force, unchanged with pending", draft, rules, { ...rules, weeklyCap: 3 }],
+    ["in force, changed", { ...draft, weeklyCap: "3" }, rules, null],
+    ["in force, changed but incomplete", { ...draft, weeklyCap: "3", roles: [] }, rules, null],
+    ["in force ended, unchanged", draftFromRules({ ...rules, endsOn: "2026-11-01" }), { ...rules, endsOn: "2026-11-01" }, null],
+  ])("always gives a reason when Approve is unavailable (%s)", (_name, state, inForce, pending) => {
+    const result = approveState(state, { inForce, pending, minEndsOn: "2026-11-09" });
+    if (!result.canApprove) expect(result.reasons.length).toBeGreaterThan(0);
+    else expect(result.reasons).toEqual([]);
+  });
+
+  it("flags an end date that has passed, even when it is the date of the rules in force", () => {
+    const ended = { ...rules, endsOn: "2026-11-01" };
+    const state = approveState(draftFromRules(ended), { inForce: ended, pending: null, minEndsOn: "2026-11-09" });
+    expect(state).toMatchObject({ canApprove: false, reasons: ["This date has passed. Pick a new end date to start again."] });
+    expect(draftErrors(draftFromRules(ended), "2026-11-09")).toEqual({
+      endsOn: "This date has passed. Pick a new end date to start again.",
+    });
+  });
+});
+
+describe("endsOnError", () => {
+  it("accepts dates from the minimum on and explains earlier ones", () => {
+    expect(endsOnError("2026-11-09", "2026-11-09")).toBeNull();
+    expect(endsOnError("2026-11-08", "2026-11-09")).toBe("Pick an end date after today.");
+    expect(endsOnError("2026-11-07", "2026-11-09")).toBe("This date has passed. Pick a new end date to start again.");
+    expect(endsOnError("", "2026-11-09")).toBeNull();
+  });
+
+  it("keeps schema errors and adds the end-date error only when the date itself is valid", () => {
+    expect(draftErrors({ ...draft, endsOn: "" }, "2026-11-09")).toEqual({ endsOn: "Pick an end date." });
+    expect(draftErrors({ ...draft, roles: [] }, "2026-11-09")).toEqual({ roles: "Pick at least one role type." });
+    expect(draftErrors(draft, "2026-11-09")).toEqual({});
   });
 });

@@ -103,8 +103,38 @@ describe("runWeeklyPass", () => {
 
   it("does nothing after the campaign's end date", async () => {
     const world = await createWorld();
-    await approveRules(world, { endsOn: "2026-12-15" });
+    // Approved on the fixed test clock, so this keeps passing after 2026-12-15 in real time.
+    await approveRules(world, { endsOn: "2026-12-15" }, NOW);
     expect((await runWeeklyPass(world.user.id, "user", new Date("2026-12-16T12:00:00Z"))).reason).toBe("Campaign has ended");
+  });
+
+  it("skips a posting that closed mid-pass without counting it as failed", async () => {
+    const world = await createWorld();
+    await approveRules(world, { askFirstCompanies: [] });
+    const original = db.job.findUnique.bind(db.job);
+    const spy = vi.spyOn(db.job, "findUnique").mockImplementationOnce((async (args: Parameters<typeof db.job.findUnique>[0]) => {
+      await db.job.update({ where: { id: world.jobs.stripe.id }, data: { closedAt: NOW } });
+      return original(args);
+    }) as unknown as typeof db.job.findUnique);
+    vi.mocked(console.error).mockClear();
+    try {
+      const summary = await runWeeklyPass(world.user.id, "inroad", NOW);
+      expect(summary.failed).toBeUndefined();
+      expect(summary.submitted).not.toContain(label("Stripe", "stripe"));
+      expect(console.error).not.toHaveBeenCalled();
+      const [blocked] = await auditFor(world.user.id, "application.blocked");
+      expect(blocked.payload).toMatchObject({ jobId: world.jobs.stripe.id, reason: "This posting has closed." });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("matches campaign companies the way company names are compared (runs of spaces collapse)", async () => {
+    const world = await createWorld();
+    await db.company.update({ where: { id: world.companies.Datadog.id }, data: { name: "Data Dog" } });
+    await approveRules(world, { autoCompanies: ["Data  Dog"], askFirstCompanies: [] });
+    const summary = await runWeeklyPass(world.user.id, "inroad", NOW);
+    expect(summary.submitted).toEqual(["Data Dog · Datadog SWE Intern datadog"]);
   });
 
   it("stops with a clear reason when the user has no resume", async () => {
@@ -140,6 +170,13 @@ describe("approveWaiting / skipWaiting", () => {
       previousReason: "Not on your company list",
     });
     expect(await auditFor(world.user.id, "application.skipped")).toHaveLength(1);
+  });
+
+  it("stamps decidedAt with the clock it is given", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    const held = await prepareApplication(world.user.id, world.jobs.palantir.id, "user", NOW);
+    expect((await skipWaiting(world.user.id, held.id, NOW)).decidedAt).toEqual(NOW);
   });
 
   it("never touches another user's application", async () => {
@@ -245,6 +282,14 @@ describe("recordSubmission", () => {
     const events = await auditFor(world.user.id, "application.submitted");
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ actor: "muse", payload: { hasConfirmation: true } });
+  });
+
+  it("stamps submittedAt with the clock its gate used, so the row counts in that week", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    const app = await prepareApplication(world.user.id, world.jobs.stripe.id, "muse", NOW);
+    const submitted = await recordSubmission(world.user.id, app.id, "muse", undefined, NOW);
+    expect(submitted.submittedAt).toEqual(NOW);
   });
 
   it("stores no confirmation when it is blank", async () => {

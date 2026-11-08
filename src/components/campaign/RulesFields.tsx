@@ -100,7 +100,7 @@ export function RulesFields(props: RulesFieldsProps) {
   const { draft, companies, errors, minEndsOn, onToggleRole, onCycleCompany, onChange, onClamp } = props;
   return (
     <section className="panel" aria-label="Campaign rules">
-      <fieldset className="field m-0 border-0 p-0">
+      <fieldset className="field m-0 border-0 p-0" aria-describedby={errors.roles ? "roles-error" : undefined}>
         <legend className="label mb-2">Role types</legend>
         <div className="opts">
           {ROLE_OPTIONS.map(([role, label]) => (
@@ -109,6 +109,7 @@ export function RulesFields(props: RulesFieldsProps) {
             </button>
           ))}
         </div>
+        <FieldError id="roles-error" message={errors.roles} />
       </fieldset>
 
       <fieldset className="field m-0 border-0 p-0" aria-describedby="companies-hint">

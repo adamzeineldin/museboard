@@ -3,7 +3,6 @@ import type { Match, Prisma, Resume, User } from "@/generated/prisma/client";
 import { loadRuleCampaign, type RuleContext } from "@/lib/campaign";
 import { checkApplication, type RuleCheckResult } from "@/lib/rules";
 import type { DbClient } from "./client";
-import { getDefaultResume } from "./deps";
 import { ApplicationError } from "./errors";
 import type { JobWithCompany } from "./packet";
 import type { StoredCheckResult } from "./types";
@@ -21,14 +20,10 @@ export async function loadJobOrThrow(client: DbClient, jobId: string): Promise<J
   return job;
 }
 
-/** The resume the campaign names (if it is in force and still the user's), else the default resume. */
-export async function pickResume(client: DbClient, userId: string, rule: RuleContext): Promise<Resume | null> {
+/** The resume the campaign names, if it is in force and still the user's. Safe to call with a transaction client. */
+export async function namedResume(client: DbClient, userId: string, rule: RuleContext): Promise<Resume | null> {
   const named = rule.rules?.resumeId;
-  if (named) {
-    const resume = await client.resume.findFirst({ where: { id: named, userId } });
-    if (resume) return resume;
-  }
-  return getDefaultResume(userId);
+  return named ? client.resume.findFirst({ where: { id: named, userId } }) : null;
 }
 
 export interface CheckRun {
