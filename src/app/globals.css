@@ -5,9 +5,11 @@
    --sans / --mono put the next/font families (set on <html> in the root layout) first.
    Accessibility changes (milestone 8, WCAG 2.1 AA 4.5:1 for small text; audited by src/app/styles/contrast.test.ts):
    light --accent-fg #FFFFFF -> #042419 (white on #10B47E was 2.67:1; now 6.17:1, the dark theme's ink),
-   light --warm #A35F06 -> #965705 (warm chip was 4.45:1 on --warm-soft; now 5.10:1). Dark tokens unchanged. */
+   light --warm #A35F06 -> #965705 (warm chip was 4.45:1 on --warm-soft; now 5.10:1). Dark tokens unchanged.
+   --field-border (not in the prototype) outlines inputs, selects and textareas at 3:1 or more against
+   --bg, --surface and --surface-2 (1.4.11); --line was about 1.2:1. */
 :root{
-  --bg:#F4F7F6; --surface:#FFFFFF; --surface-2:#EEF3F1; --fg:#14201C; --muted:#5E6C67; --line:#E1E8E5;
+  --bg:#F4F7F6; --surface:#FFFFFF; --surface-2:#EEF3F1; --fg:#14201C; --muted:#5E6C67; --line:#E1E8E5; --field-border:#7A8984;
   --accent:#10B47E; --accent-ink:#0A7A56; --accent-fg:#042419; --accent-soft:#E2F6EE; --ring-track:#DCEDE6;
   --warm:#965705; --warm-soft:#FDF0DC; --hold:#B23B2B; --hold-soft:#FCE6E2; --ok:#0A7A56; --ok-soft:#E2F6EE;
   --shadow:0 1px 2px rgba(20,32,28,.04),0 4px 14px rgba(20,32,28,.05);
@@ -15,12 +17,12 @@
   --mono:var(--font-plex-mono), "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0D1412; --surface:#141D1A; --surface-2:#1B2622; --fg:#E5EDEA; --muted:#93A39D; --line:#25332E;
+  --bg:#0D1412; --surface:#141D1A; --surface-2:#1B2622; --fg:#E5EDEA; --muted:#93A39D; --line:#25332E; --field-border:#647570;
   --accent:#2FD39A; --accent-ink:#5BE0B1; --accent-fg:#042419; --accent-soft:#123328; --ring-track:#1E3a30;
   --warm:#EBAE55; --warm-soft:#382812; --hold:#F0907F; --hold-soft:#3B1E19; --ok:#5BE0B1; --ok-soft:#123328;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0D1412; --surface:#141D1A; --surface-2:#1B2622; --fg:#E5EDEA; --muted:#93A39D; --line:#25332E;
+  --bg:#0D1412; --surface:#141D1A; --surface-2:#1B2622; --fg:#E5EDEA; --muted:#93A39D; --line:#25332E; --field-border:#647570;
   --accent:#2FD39A; --accent-ink:#5BE0B1; --accent-fg:#042419; --accent-soft:#123328; --ring-track:#1E3a30;
   --warm:#EBAE55; --warm-soft:#382812; --hold:#F0907F; --hold-soft:#3B1E19; --ok:#5BE0B1; --ok-soft:#123328;
   --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark}
@@ -33,6 +35,7 @@
   --color-fg: var(--fg);
   --color-muted: var(--muted);
   --color-line: var(--line);
+  --color-field-border: var(--field-border);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-accent-fg: var(--accent-fg);
@@ -69,5 +72,6 @@
   a:not([class]){text-decoration:underline;text-underline-offset:2px}
   :focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
-  input,select,textarea{font:inherit;font-size:.9rem;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
+  /* Radios and checkboxes keep their native size: width:100% would stretch them across a flex row. */
+  input:not([type=radio]):not([type=checkbox]),select,textarea{font:inherit;font-size:.9rem;color:var(--fg);background:var(--bg);border:1px solid var(--field-border);border-radius:10px;padding:8px 10px;width:100%}
 }

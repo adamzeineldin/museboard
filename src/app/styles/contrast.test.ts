@@ -71,6 +71,38 @@ describe.each([
   it.each(["bg", "surface", "surface-2"])("accent-ink on %s is at least 3:1", (bg) => {
     expect(contrast(palette["accent-ink"], palette[bg])).toBeGreaterThanOrEqual(3);
   });
+  // Inside a toast the ring takes the toast's text colour (components.css), so it is drawn on the toast fill.
+  it.each([
+    ["bg", "fg", "toast"],
+    ["surface", "hold", "error toast"],
+  ])("%s on %s (%s ring) is at least 3:1", (ring, fill) => {
+    expect(contrast(palette[ring], palette[fill])).toBeGreaterThanOrEqual(3);
+  });
+});
+
+/** Non-text (1.4.11): input, select and textarea borders must reach 3:1 against every surface a field sits on. */
+describe.each([
+  ["light", light],
+  ["dark", dark],
+])("form field border contrast (%s)", (_theme, palette) => {
+  it.each(["bg", "surface", "surface-2"])("field-border on %s is at least 3:1", (bg) => {
+    expect(palette["field-border"], "missing --field-border").toBeDefined();
+    expect(contrast(palette["field-border"], palette[bg])).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("component rules", () => {
+  it("toast controls draw the focus ring in the toast's text colour", () => {
+    const COMPONENTS = readFileSync(path.resolve(import.meta.dirname, "components.css"), "utf8");
+    expect(COMPONENTS).toMatch(/\.toast :focus-visible\{outline-color:currentColor\}/);
+  });
+
+  it("fields use --field-border and the base field rule skips radios and checkboxes", () => {
+    const rule = CSS.match(/^\s*(input[^{]*,select,textarea)\{([^}]*)\}/m);
+    expect(rule, "base input rule").not.toBeNull();
+    expect(rule?.[1]).toBe("input:not([type=radio]):not([type=checkbox]),select,textarea");
+    expect(rule?.[2]).toContain("border:1px solid var(--field-border)");
+  });
 });
 
 describe("the dark tokens are the same in both dark blocks", () => {

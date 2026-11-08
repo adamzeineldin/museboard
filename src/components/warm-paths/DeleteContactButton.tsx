@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { deleteContactAction } from "@/app/(app)/warm-paths/actions";
 import { Button } from "@/components/ui";
 import { useToast } from "./Toast";
+import { resultToast } from "./toast-state";
 import { WARM_PATHS_PATH } from "./selection";
 
 export interface DeleteContactButtonProps {
@@ -28,11 +29,12 @@ export function DeleteContactButton({ contactId, contactName }: DeleteContactBut
     startTransition(async () => {
       try {
         const result = await deleteContactAction(contactId);
-        notify(result.ok ? result.message : result.error);
+        const { text, tone } = resultToast(result);
+        notify(text, tone);
         if (result.ok) router.replace(WARM_PATHS_PATH, { scroll: false });
         else setConfirming(false);
       } catch {
-        notify("We couldn't delete that contact. Check your connection and try again.");
+        notify("We couldn't delete that contact. Check your connection and try again.", "error");
         setConfirming(false);
       }
     });

@@ -36,22 +36,26 @@ export function DraftOptions({ contactId, kind, jobId, jobs, companyName }: Draf
         ))}
       </div>
       <div className="field min-w-0 flex-1 basis-56">
-        <label htmlFor={selectId} className="label">
-          Role
-        </label>
         {jobs.length > 0 ? (
-          <select id={selectId} value={jobId ?? NO_JOB} onChange={(event) => go({ jobId: event.target.value })}>
-            {jobs.map((job) => (
-              <option key={job.id} value={job.id}>
-                {job.title}
-              </option>
-            ))}
-            <option value={NO_JOB}>No specific role</option>
-          </select>
+          <>
+            <label htmlFor={selectId} className="label">
+              Role
+            </label>
+            <select id={selectId} value={jobId ?? NO_JOB} onChange={(event) => go({ jobId: event.target.value })}>
+              {jobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.title}
+                </option>
+              ))}
+              <option value={NO_JOB}>No specific role</option>
+            </select>
+          </>
         ) : (
-          <p id={selectId} className="text-sm text-muted">
-            No open roles at {companyName} right now. The draft asks about the company in general.
-          </p>
+          <>
+            {/* Nothing to label here, so plain text instead of a <label> with no control. */}
+            <span className="label">Role</span>
+            <p className="text-sm text-muted">No open roles at {companyName} right now. The draft asks about the company in general.</p>
+          </>
         )}
       </div>
     </div>

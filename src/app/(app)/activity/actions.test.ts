@@ -32,7 +32,29 @@ describe("activity actions", () => {
     const signedOut = { ok: false, message: "Your session ended. Sign in again." };
     expect(await runWeeklyPassAction()).toEqual(signedOut);
     expect(await approveApplicationAction("x")).toEqual(signedOut);
+    expect(await skipApplicationAction("x")).toEqual(signedOut);
     expect(await markSubmittedAction("x")).toEqual(signedOut);
+  });
+
+  it("takes the user from the session: another user's application ids are not found and nothing changes", async () => {
+    const owner = await createWorld();
+    const stranger = await createWorld();
+    await approveRules(owner, { weeklyCap: 2, askFirstCompanies: [] });
+    getSessionUserId.mockResolvedValue(owner.user.id);
+    await runWeeklyPassAction();
+    const waiting = await appFor(owner, "ramp");
+    const prepared = await appFor(owner, "stripe");
+    expect([waiting.status, prepared.status]).toEqual(["waiting", "prepared"]);
+    const before = await db.application.findMany({ where: { userId: owner.user.id }, orderBy: { id: "asc" } });
+
+    getSessionUserId.mockResolvedValue(stranger.user.id);
+    const notFound = { ok: false, message: "We couldn't find that application." };
+    expect(await approveApplicationAction(waiting.id)).toEqual(notFound);
+    expect(await skipApplicationAction(waiting.id)).toEqual(notFound);
+    expect(await markSubmittedAction(prepared.id)).toEqual(notFound);
+
+    expect(await db.application.findMany({ where: { userId: owner.user.id }, orderBy: { id: "asc" } })).toEqual(before);
+    expect(await db.auditEvent.count({ where: { userId: stranger.user.id } })).toBe(0);
   });
 
   it("over cap after a user approval: Mark as submitted is refused for the held row, like getSubmissionPacket", async () => {

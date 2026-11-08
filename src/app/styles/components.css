@@ -144,7 +144,8 @@
   @media (max-width:1180px){.muse{position:static;height:auto;min-height:280px;border-left:0;border-top:1px solid var(--line);margin:0 max(16px,2vw) 32px;border:1px solid var(--line);border-radius:16px}}
   @media (max-width:760px){.muse{margin:0 max(16px,env(safe-area-inset-right,0px)) 32px max(16px,env(safe-area-inset-left,0px))}}
   .muse-h{padding:18px 18px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
-  .who{display:flex;align-items:center;gap:10px}
+  .who{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .who > div{flex:1 1 9rem;min-width:0}
   .avatar{width:34px;height:34px;border-radius:50%;background:var(--fg);color:var(--bg);display:grid;place-items:center;font-weight:800;font-size:.9rem;flex:none}
   .who b{font-weight:800;font-size:1rem;display:block;line-height:1.2}
   .who span{font-size:.76rem;color:var(--muted)}
@@ -171,6 +172,8 @@
   .toast a{color:var(--bg)}
   .toast.error a{color:var(--surface)}
   .toast-close{background:transparent;border:0;color:inherit;min-width:24px;min-height:24px;padding:0 4px}
+  /* The global accent-ink ring disappears on the toast fill (1.1-1.4:1); the toast text colour passes. */
+  .toast :focus-visible{outline-color:currentColor}
   .toast.error{background:var(--hold);color:var(--surface)}
   /* width:max-content + max-width: without an explicit width, left:50% caps the shrink-to-fit width at half the
      viewport and long messages wrap into a disc on phones. A 20px radius is a pill on one line, a card on several. */

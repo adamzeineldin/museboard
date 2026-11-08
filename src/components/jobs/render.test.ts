@@ -7,10 +7,13 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 import { ResumeList } from "@/components/resume/ResumeList";
 import { ResumeUploadForm } from "@/components/resume/ResumeUploadForm";
 import { IDLE_RESUME_STATE } from "@/components/resume/action-state";
+import { Button } from "@/components/ui";
+import { FeedBanners } from "./FeedBanners";
 import { JobCard } from "./JobCard";
 import { JobFilters } from "./JobFilters";
 import { JobsToastProvider } from "./JobsToast";
 import type { JobCardModel } from "./job-view-model";
+import { prepareButtonState } from "./prepare-state";
 
 const card: JobCardModel = {
   id: "greenhouse:stripe:1",
@@ -62,8 +65,55 @@ describe("JobCard markup", () => {
     expect(waiting).toMatch(/>Prepare<span class="sr-only">/);
   });
 
+  it("hides Prepare on a skipped card (the Skipped chip explains why)", () => {
+    const skipped = render(
+      createElement(JobCard, { card: { ...card, chip: { tone: "neutral", label: "Skipped" }, applicationStatus: "skipped" }, hasResume: true, prepare }),
+    );
+    expect(skipped).toContain('class="chip neutral">Skipped');
+    expect(skipped).not.toContain(">Prepare");
+  });
+
+  it("makes the card heading a programmatic focus target for after Prepare", () => {
+    const html = render(createElement(JobCard, { card, hasResume: true, prepare }));
+    expect(html).toContain('<h3 id="job-greenhouse-stripe-1-title" tabindex="-1">');
+  });
+
+  it("renders prepareButtonState(true) on a Button as aria-disabled and aria-busy with the pending label, never disabled", () => {
+    const { label, ...ariaState } = prepareButtonState(true);
+    const html = renderToStaticMarkup(createElement(Button, { size: "small", ...ariaState }, label));
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain(">Preparing…</button>");
+    expect(html).not.toMatch(/<button[^>]* disabled=""/);
+  });
+
+  it("renders an idle Prepare button with no aria-disabled or aria-busy", () => {
+    const html = render(createElement(JobCard, { card, hasResume: true, prepare }));
+    const button = html.match(/<button[^>]*>Prepare</)?.[0] ?? "";
+    expect(button).not.toBe("");
+    expect(button).not.toMatch(/ (aria-disabled|aria-busy|disabled)="/);
+  });
+
   it("renders always-present live regions for toasts (status for success, alert for errors)", () => {
     expect(render(null)).toBe('<div role="status" aria-live="polite" aria-atomic="true"></div><div role="alert" aria-atomic="true"></div>');
+  });
+});
+
+describe("feed banners", () => {
+  it("renders nothing when rules and contacts loaded", () => {
+    expect(renderToStaticMarkup(createElement(FeedBanners, { rulesAvailable: true, contactsAvailable: true }))).toBe("");
+  });
+
+  it("warns when contacts failed to load, so an empty warm filter isn't mistaken for no contacts", () => {
+    const html = renderToStaticMarkup(createElement(FeedBanners, { rulesAvailable: true, contactsAvailable: false }));
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Inroad couldn&#x27;t load your contacts, so warm paths aren&#x27;t shown. Reload to try again.");
+    expect(html).not.toContain("campaign rules");
+  });
+
+  it("warns when rules failed to load", () => {
+    const html = renderToStaticMarkup(createElement(FeedBanners, { rulesAvailable: false, contactsAvailable: true }));
+    expect(html).toContain("campaign rules");
   });
 });
 
@@ -96,5 +146,7 @@ describe("filters and resume forms", () => {
     expect(html).toContain('href="/api/resumes/r1"');
     expect(html).toContain('class="chip ok">Default');
     expect(html.match(/Make default/g)).toHaveLength(1);
+    // Cancel on the inline confirmation hands focus back to the row's Delete button by this id.
+    expect(html).toMatch(/<button [^>]*id="resume-delete-r2"[^>]*>Delete<span class="sr-only"> old.txt/);
   });
 });

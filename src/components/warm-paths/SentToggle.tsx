@@ -5,6 +5,7 @@ import { markPreviewSentAction, setSentAction } from "@/app/(app)/warm-paths/act
 import type { OutreachKind } from "@/lib/types";
 import type { ActionResult } from "./action-state";
 import { useToast } from "./Toast";
+import { resultToast } from "./toast-state";
 
 export type SentToggleTarget =
   | { type: "saved"; outreachId: string }
@@ -39,7 +40,8 @@ export function SentToggle({ target, sent, contactName }: SentToggleProps) {
       } catch {
         result = { ok: false, error: "We couldn't update this draft. Check your connection and try again." };
       }
-      notify(result.ok ? result.message : result.error);
+      const { text, tone } = resultToast(result);
+      notify(text, tone);
     });
   }
 

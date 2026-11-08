@@ -8,11 +8,11 @@ import {
   skipApplicationAction,
   type ActivityActionResult,
 } from "@/app/(app)/activity/actions";
-import { Button, EmptyState } from "@/components/ui";
+import { Button, ButtonLink, EmptyState } from "@/components/ui";
 import { Toast, useToast } from "../campaign/Toast";
 import { ActivityRow } from "./ActivityRow";
 import type { ActivityRowModel } from "./rows";
-import { hiddenHistoryNote, statsModel, type StatsLike } from "./view-model";
+import { emptyActivityCopy, hiddenHistoryNote, statsModel, type StatsLike } from "./view-model";
 
 export interface ActivityViewProps {
   rows: ActivityRowModel[];
@@ -57,7 +57,17 @@ export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }:
         ))}
       </div>
       {rows.length === 0 ? (
-        <EmptyState>Nothing yet. Approve a campaign, then ask Muse to run this week&apos;s pass.</EmptyState>
+        <EmptyState
+          action={
+            campaignActive ? null : (
+              <ButtonLink href="/campaign" variant="primary" size="small">
+                Go to campaign
+              </ButtonLink>
+            )
+          }
+        >
+          {emptyActivityCopy(campaignActive)}
+        </EmptyState>
       ) : (
         <ul className="list m-0 list-none p-0" aria-label="Applications">
           {rows.map((row) => (

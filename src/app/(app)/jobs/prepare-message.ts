@@ -19,7 +19,7 @@ export function prepareMessage({ status, reason, title, companyName }: PrepareOu
     case "submitted":
       return `You already applied to ${role}.`;
     case "skipped":
-      return `You skipped ${role} earlier. It's in Activity if you change your mind.`;
+      return `You skipped ${role}. Inroad won't prepare it.`;
     default:
       return `Updated ${role}. See Activity for details.`;
   }

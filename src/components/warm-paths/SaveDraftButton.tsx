@@ -5,6 +5,7 @@ import { saveDraftAction } from "@/app/(app)/warm-paths/actions";
 import { Button } from "@/components/ui";
 import type { OutreachKind } from "@/lib/types";
 import { useToast } from "./Toast";
+import { resultToast } from "./toast-state";
 
 export interface SaveDraftButtonProps {
   contactId: string;
@@ -20,9 +21,10 @@ export function SaveDraftButton({ contactId, kind, jobId }: SaveDraftButtonProps
     startTransition(async () => {
       try {
         const result = await saveDraftAction({ contactId, kind, jobId: jobId ?? undefined });
-        notify(result.ok ? result.message : result.error);
+        const { text, tone } = resultToast(result);
+        notify(text, tone);
       } catch {
-        notify("We couldn't save this draft. Check your connection and try again.");
+        notify("We couldn't save this draft. Check your connection and try again.", "error");
       }
     });
   }

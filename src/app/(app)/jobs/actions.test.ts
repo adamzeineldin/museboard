@@ -98,4 +98,8 @@ describe("prepareMessage", () => {
   ])("%s", (status, pattern) => {
     expect(prepareMessage({ status, reason: "", title: "T", companyName: "C" })).toMatch(pattern);
   });
+
+  it("says a skipped job stays skipped instead of promising an undo in Activity", () => {
+    expect(prepareMessage({ status: "skipped", reason: "", title: "T", companyName: "C" })).toBe("You skipped T at C. Inroad won't prepare it.");
+  });
 });

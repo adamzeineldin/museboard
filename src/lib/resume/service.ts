@@ -4,7 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { pendingVersion, pickVersionInForce } from "@/lib/rules";
 import { parseCampaignRules } from "@/lib/types";
-import { RESUME_CONTENT_TYPES, type ResumeKind } from "./constants";
+import { MAX_RESUMES_PER_USER, RESUME_CONTENT_TYPES, type ResumeKind } from "./constants";
 import { extractResumeText, ResumeExtractionError } from "./extract";
 import { extensionKind, sanitizeFilename, validateResumeFile } from "./file-type";
 import { getResumeStorage, newResumeStorageKey, type FileStorage } from "./storage";
@@ -12,7 +12,7 @@ import { getResumeStorage, newResumeStorageKey, type FileStorage } from "./stora
 // Resume lifecycle: upload (validate -> extract -> store -> row), set default, delete, download.
 // Every function takes the owner's userId (from the session) and only touches that user's rows.
 
-export type ResumeErrorCode = "invalid_file" | "extraction_failed" | "not_found" | "in_use" | "storage_failed";
+export type ResumeErrorCode = "invalid_file" | "limit_reached" | "extraction_failed" | "not_found" | "in_use" | "storage_failed";
 
 /** An expected failure whose message is safe to show the user. */
 export class ResumeError extends Error {
@@ -31,6 +31,7 @@ export interface ResumeDeps {
 }
 
 const NOT_FOUND = "That resume doesn't exist or isn't yours.";
+const LIMIT_REACHED = `Inroad keeps up to ${MAX_RESUMES_PER_USER} resumes per account. Delete one that isn't attached to an application to upload another.`;
 const LIVE_CAMPAIGN_STATUSES = ["active", "paused"];
 
 const storageOf = (deps: ResumeDeps): FileStorage => deps.storage ?? getResumeStorage();
@@ -68,10 +69,30 @@ async function extractOrThrow(bytes: Uint8Array, kind: ResumeKind): Promise<stri
   }
 }
 
+interface NewResumeRow {
+  userId: string;
+  filename: string;
+  storageKey: string;
+  parsedText: string;
+}
+
+/** Re-counts inside the transaction: concurrent uploads can all pass the cheap pre-check, but only one wins the last slot. */
+async function createResumeRow(row: NewResumeRow): Promise<Resume> {
+  return db.$transaction(async (tx) => {
+    if ((await tx.resume.count({ where: { userId: row.userId } })) >= MAX_RESUMES_PER_USER) {
+      throw new ResumeError("limit_reached", LIMIT_REACHED);
+    }
+    const hasDefault = (await tx.resume.count({ where: { userId: row.userId, isDefault: true } })) > 0;
+    return tx.resume.create({ data: { ...row, isDefault: !hasDefault } });
+  });
+}
+
 export async function uploadResume(userId: string, input: UploadInput, deps: ResumeDeps = {}): Promise<UploadResult> {
   const filename = sanitizeFilename(input.filename);
   const check = validateResumeFile(filename, input.bytes);
   if (!check.ok) throw new ResumeError("invalid_file", check.error);
+  // Checked before parsing and storing, so a user at the cap costs no CPU or disk.
+  if ((await db.resume.count({ where: { userId } })) >= MAX_RESUMES_PER_USER) throw new ResumeError("limit_reached", LIMIT_REACHED);
 
   const parsedText = await extractOrThrow(input.bytes, check.kind);
   const storage = storageOf(deps);
@@ -84,10 +105,7 @@ export async function uploadResume(userId: string, input: UploadInput, deps: Res
   }
 
   try {
-    const resume = await db.$transaction(async (tx) => {
-      const hasDefault = (await tx.resume.count({ where: { userId, isDefault: true } })) > 0;
-      return tx.resume.create({ data: { userId, filename, storageKey, parsedText, isDefault: !hasDefault } });
-    });
+    const resume = await createResumeRow({ userId, filename, storageKey, parsedText });
     await writeAudit(userId, "user", "resume.uploaded", {
       resumeId: resume.id,
       filename,

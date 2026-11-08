@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type FocusEvent, type ReactNode } from "react";
+import { isToastPaused, toastTimeoutMs, withPauseReason, type PauseReason, type ToastPause } from "./toast-timer";
 
 // One toast region for the Jobs feed. The live region is always in the DOM so screen readers
 // announce each new message; the visible pill matches the prototype's .toast.
@@ -19,7 +20,6 @@ interface ToastApi {
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
-const TOAST_MS = 7000;
 
 export function useJobsToast(): ToastApi {
   const api = useContext(ToastContext);
@@ -27,9 +27,26 @@ export function useJobsToast(): ToastApi {
   return api;
 }
 
-function ToastPill({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () => void }) {
+interface ToastPillProps {
+  toast: ToastMessage;
+  onDismiss: () => void;
+  /** Report hover/focus so the auto-dismiss timer waits while the user is using the toast. */
+  onPause: (reason: PauseReason, on: boolean) => void;
+}
+
+function ToastPill({ toast, onDismiss, onPause }: ToastPillProps) {
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) onPause("focus", false);
+  };
   return (
-    <div key={toast.id} className={`toast flex flex-wrap items-center gap-3 max-w-[calc(100vw-32px)]${toast.tone === "error" ? " error" : ""}`}>
+    <div
+      key={toast.id}
+      className={`toast flex flex-wrap items-center gap-3 max-w-[calc(100vw-32px)]${toast.tone === "error" ? " error" : ""}`}
+      onMouseEnter={() => onPause("hover", true)}
+      onMouseLeave={() => onPause("hover", false)}
+      onFocus={() => onPause("focus", true)}
+      onBlur={onBlur}
+    >
       <span>{toast.text}</span>
       {toast.activityLink ? (
         <Link href="/activity" className="underline underline-offset-2">
@@ -45,16 +62,29 @@ function ToastPill({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () =>
 
 export function JobsToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [pause, setPause] = useState<ToastPause | null>(null);
+  const toastId = toast?.id ?? null;
+  const paused = isToastPaused(pause, toastId);
 
   const show = useCallback<ToastApi["show"]>((text, options = {}) => {
     setToast({ id: Date.now(), text, tone: options.tone ?? "ok", activityLink: options.activityLink ?? true });
   }, []);
 
+  // Restarts on each new toast and whenever the user stops hovering or focusing it.
   useEffect(() => {
-    if (!toast) return undefined;
-    const timer = setTimeout(() => setToast(null), TOAST_MS);
+    const ms = toastTimeoutMs(toastId !== null, paused);
+    if (ms === null) return undefined;
+    const timer = setTimeout(() => setToast(null), ms);
     return () => clearTimeout(timer);
-  }, [toast]);
+  }, [toastId, paused]);
+
+  const onPause = useCallback(
+    (reason: PauseReason, on: boolean) => {
+      if (toastId !== null) setPause((prev) => withPauseReason(prev, toastId, reason, on));
+    },
+    [toastId],
+  );
+  const dismiss = useCallback(() => setToast(null), []);
 
   const api = useMemo(() => ({ show }), [show]);
   return (
@@ -62,10 +92,10 @@ export function JobsToastProvider({ children }: { children: ReactNode }) {
       {children}
       {/* Both regions stay mounted: successes are announced politely, errors assertively. */}
       <div role="status" aria-live="polite" aria-atomic="true">
-        {toast?.tone === "ok" ? <ToastPill toast={toast} onDismiss={() => setToast(null)} /> : null}
+        {toast?.tone === "ok" ? <ToastPill toast={toast} onDismiss={dismiss} onPause={onPause} /> : null}
       </div>
       <div role="alert" aria-atomic="true">
-        {toast?.tone === "error" ? <ToastPill toast={toast} onDismiss={() => setToast(null)} /> : null}
+        {toast?.tone === "error" ? <ToastPill toast={toast} onDismiss={dismiss} onPause={onPause} /> : null}
       </div>
     </ToastContext.Provider>
   );

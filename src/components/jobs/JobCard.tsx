@@ -39,7 +39,8 @@ export function JobCard({ card, hasResume, prepare }: JobCardProps) {
             </div>
           </div>
         </div>
-        <h3 id={titleId}>
+        {/* tabIndex -1: PrepareButton moves focus here when it disappears after a successful Prepare. */}
+        <h3 id={titleId} tabIndex={-1}>
           {card.postingUrl ? (
             <a href={card.postingUrl} target="_blank" rel="noopener noreferrer" className="no-underline hover:underline">
               {card.title}
@@ -70,9 +71,13 @@ export function JobCard({ card, hasResume, prepare }: JobCardProps) {
                 Ask for referral<span className="sr-only"> for {jobLabel}</span>
               </ButtonLink>
             ) : null}
-            {card.applicationStatus === "submitted" || card.applicationStatus === "prepared" ? null : (
-              <PrepareButton jobId={card.id} jobLabel={jobLabel} prepare={prepare} />
-            )}
+            <PrepareButton
+              jobId={card.id}
+              jobLabel={jobLabel}
+              applicationStatus={card.applicationStatus}
+              focusTargetId={titleId}
+              prepare={prepare}
+            />
           </div>
         </div>
       </div>

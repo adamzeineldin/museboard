@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { FeedBanners } from "@/components/jobs/FeedBanners";
 import { JobCard } from "@/components/jobs/JobCard";
 import { JobFilters } from "@/components/jobs/JobFilters";
 import { JobsToastProvider } from "@/components/jobs/JobsToast";
@@ -23,7 +24,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
   const user = await requireUser();
   const feed = await loadJobsFeed({ id: user.id, timezone: user.timezone }, { filter, limit });
   const header = feedHeader(feed.newMatchCount, feed.totalOpen, feed.resume?.filename ?? null);
-  const empty = emptyFeedCopy(filter);
+  const empty = emptyFeedCopy(filter, { contactsAvailable: feed.contactsAvailable });
 
   return (
     <JobsToastProvider>
@@ -43,12 +44,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
       </div>
 
       {feed.resume ? null : <ResumePrompt action={uploadResumeAction} />}
-      {feed.rulesAvailable ? null : (
-        <p className="banner hold" role="alert">
-          Inroad couldn&apos;t load your campaign rules, so job statuses aren&apos;t shown right now. Nothing is applied
-          while this is the case. Reload to try again.
-        </p>
-      )}
+      <FeedBanners rulesAvailable={feed.rulesAvailable} contactsAvailable={feed.contactsAvailable} />
 
       <JobFilters active={filter} />
 
@@ -56,7 +52,7 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
         <EmptyState
           title={empty.title}
           action={
-            filter === "warm" ? (
+            empty.addContacts ? (
               <ButtonLink href="/warm-paths" size="small" variant="primary">
                 Add contacts
               </ButtonLink>

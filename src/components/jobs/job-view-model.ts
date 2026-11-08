@@ -264,9 +264,23 @@ export function buildJobCards(input: FeedInput): FeedResult {
 export interface EmptyFeedCopy {
   title: string;
   body: string;
+  /** Offer the "Add contacts" button (warm filter, only when contacts actually loaded). */
+  addContacts: boolean;
 }
 
-export function emptyFeedCopy(filter: JobFilter): EmptyFeedCopy {
+export interface EmptyFeedContext {
+  /** False when the contacts query failed, so an empty warm filter says nothing about the user's contacts. */
+  contactsAvailable?: boolean;
+}
+
+export function emptyFeedCopy(filter: JobFilter, { contactsAvailable = true }: EmptyFeedContext = {}): EmptyFeedCopy {
+  if (filter === "warm" && !contactsAvailable) {
+    return { title: "Warm paths aren't shown right now", body: "Inroad couldn't load your contacts. Reload to try again.", addContacts: false };
+  }
+  return { ...emptyCopyFor(filter), addContacts: filter === "warm" };
+}
+
+function emptyCopyFor(filter: JobFilter): Omit<EmptyFeedCopy, "addContacts"> {
   switch (filter) {
     case "intern":
       return { title: "No internships right now", body: "Inroad checks public company job feeds every 6 hours. New internships show up here." };

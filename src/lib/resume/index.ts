@@ -18,7 +18,7 @@ export {
   type UploadResult,
 } from "./service";
 export { resumeDownloadPath } from "./paths";
-export { MAX_RESUME_BYTES, MAX_RESUME_MB, RESUME_ACCEPT, RESUME_KINDS, type ResumeKind } from "./constants";
+export { MAX_RESUME_BYTES, MAX_RESUME_MB, MAX_RESUMES_PER_USER, RESUME_ACCEPT, RESUME_KINDS, type ResumeKind } from "./constants";
 export { detectResumeKind, validateResumeFile } from "./file-type";
 export { extractResumeText, ResumeExtractionError } from "./extract";
 export { getResumeStorage, LocalDiskStorage, type FileStorage } from "./storage";

@@ -28,7 +28,7 @@ export function CopyButton({ targetId, label }: CopyButtonProps) {
   async function copy() {
     const element = document.getElementById(targetId);
     if (!element) {
-      notify("Nothing to copy yet");
+      notify("Nothing to copy yet", "error");
       return;
     }
     const text = element.innerText || element.textContent || "";

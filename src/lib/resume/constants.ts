@@ -5,6 +5,8 @@ export type ResumeKind = (typeof RESUME_KINDS)[number];
 
 export const MAX_RESUME_BYTES = 5 * 1024 * 1024;
 export const MAX_RESUME_MB = 5;
+/** Resumes one user can keep; bounds disk use and upload parsing per account. */
+export const MAX_RESUMES_PER_USER = 10;
 /** Max characters of extracted text we keep (a long resume is ~10k). */
 export const MAX_PARSED_TEXT_CHARS = 100_000;
 export const MAX_FILENAME_LENGTH = 120;

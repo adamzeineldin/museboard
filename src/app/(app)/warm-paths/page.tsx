@@ -23,7 +23,7 @@ export default async function WarmPathsPage({ searchParams }: { searchParams: Pr
       <div className="head">
         <div>
           <h1>Warm paths</h1>
-          <p className="muted">People you could ask, from contacts and alumni lists you connected.</p>
+          <p className="muted">People you could ask, from contacts you added or imported.</p>
         </div>
       </div>
 

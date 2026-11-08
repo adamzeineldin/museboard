@@ -2,9 +2,10 @@
 
 import { Button, Chip } from "@/components/ui";
 import type { ActivityRowModel } from "./rows";
-import { initials } from "./view-model";
+import { heldNote, initials } from "./view-model";
 import { PacketView } from "./PacketView";
 import { heldLabel } from "../release/release-view";
+import { useRestoreFocus } from "./use-restore-focus";
 
 export interface ActivityRowProps {
   row: ActivityRowModel;
@@ -60,14 +61,21 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
 }
 
 export function ActivityRow(props: ActivityRowProps) {
-  const { row } = props;
+  const { row, busy, onApprove, onSkip, onMarkSubmitted } = props;
+  // The pressed button is disabled, then replaced when the status changes: return focus to the row title.
+  const { target: titleRef, markPending } = useRestoreFocus<HTMLDivElement>(busy);
+  const withFocus = (handler: (id: string) => void) => (id: string) => {
+    markPending();
+    handler(id);
+  };
+  const note = row.status === "prepared" ? heldNote(row) : null;
   return (
     <li className="row">
       <div className="logo" aria-hidden="true">
         {initials(row.companyName)}
       </div>
       <div className="min-w-0">
-        <div className="t">
+        <div className="t" tabIndex={-1} ref={titleRef}>
           {row.companyName} · {row.title}
         </div>
         <div className="meta">
@@ -76,21 +84,16 @@ export function ActivityRow(props: ActivityRowProps) {
         </div>
       </div>
       <div className="side flex-wrap">
-        <RowActions {...props} />
+        <RowActions
+          row={row}
+          busy={busy}
+          onApprove={withFocus(onApprove)}
+          onSkip={withFocus(onSkip)}
+          onMarkSubmitted={withFocus(onMarkSubmitted)}
+        />
       </div>
       <div className="col-span-full flex flex-col gap-2">
-        {row.status === "prepared" && row.held && row.recordable ? (
-          <p className="muted text-[.82rem]">
-            Muse already received this packet before it was held, so Inroad won&apos;t release it again. If the
-            application was sent, you can still mark it as submitted.
-          </p>
-        ) : null}
-        {row.status === "prepared" && row.held && !row.recordable ? (
-          <p className="muted text-[.82rem]">
-            Inroad won&apos;t release this packet while the rule check says no. It becomes ready again on its own once your
-            rules allow it (for example next week, or after you resume the campaign).
-          </p>
-        ) : null}
+        {note ? <p className="muted text-[.82rem]">{note}</p> : null}
         {row.status === "prepared" && !row.held && row.packet ? <PacketView packet={row.packet} /> : null}
         <details className="text-sm">
           <summary className="muted cursor-pointer">History ({row.history.length})</summary>

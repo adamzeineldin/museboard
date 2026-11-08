@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { describeAuditEvent, hiddenHistoryNote, initials, passToastMessage, statsModel } from "./view-model";
+import { APPLICATION_REASONS } from "@/lib/applications/errors";
+import { RELEASE_UNAVAILABLE } from "../release/release-view";
+import {
+  describeAuditEvent,
+  emptyActivityCopy,
+  heldNote,
+  hiddenHistoryNote,
+  initials,
+  passToastMessage,
+  statsModel,
+} from "./view-model";
 
 const event = (action: string, payload: Record<string, unknown>, actor: "user" | "inroad" | "muse" = "inroad") => ({
   actor,
@@ -19,9 +29,24 @@ describe("describeAuditEvent", () => {
     [event("application.packet_requested", { allowed: true }, "muse"), "Muse: Packet released for submission."],
     [event("application.packet_requested", { allowed: false, reason: "Campaign is paused" }, "muse"), "Muse: Packet refused: Campaign is paused."],
     [event("application.submitted", {}, "user"), "You: Marked as submitted."],
+    [event("application.record_refused", { reason: "Weekly limit reached" }, "muse"), "Muse: Submission not recorded: Weekly limit reached."],
+    [event("application.record_refused", {}, "user"), "You: Submission not recorded: its packet was never released."],
     [event("application.mystery", {}), "Inroad: application.mystery"],
   ])("%o", (input, text) => {
     expect(describeAuditEvent(input)).toBe(text);
+  });
+
+  it.each([
+    ["application.record_refused", { reason: APPLICATION_REASONS.postingClosed }, "Muse: Submission not recorded: This posting has closed."],
+    ["application.record_refused", { reason: "Weekly limit reached." }, "Muse: Submission not recorded: Weekly limit reached."],
+    ["application.packet_requested", { allowed: false, reason: APPLICATION_REASONS.postingClosed }, "Muse: Packet refused: This posting has closed."],
+    ["application.packet_requested", { allowed: false, reason: "Campaign is paused." }, "Muse: Packet refused: Campaign is paused."],
+    ["application.prepared", { ok: false, reason: APPLICATION_REASONS.postingClosed }, "Muse: Held for you: This posting has closed."],
+    ["application.prepared", { ok: false, reason: "Weekly limit reached." }, "Muse: Held for you: Weekly limit reached."],
+    ["application.record_refused", { reason: "Was the packet released?" }, "Muse: Submission not recorded: Was the packet released?"],
+    ["application.packet_requested", { allowed: false, reason: "Campaign is paused!" }, "Muse: Packet refused: Campaign is paused!"],
+  ])("does not double the full stop for %s with %o", (action, payload, text) => {
+    expect(describeAuditEvent(event(action, payload, "muse"))).toBe(text);
   });
 
   it("copes with a reason that is missing or not a string", () => {
@@ -37,6 +62,15 @@ describe("passToastMessage", () => {
     expect(passToastMessage({ submitted: [], waiting: [], referralDrafts: [] })).toBe("No new roles since the last pass.");
     expect(passToastMessage({ submitted: ["a"], waiting: [], referralDrafts: [], failed: ["x"] })).toBe(
       "Prepared 1. 1 couldn't be prepared.",
+    );
+  });
+
+  it("doesn't lead with 'Prepared 0' when everything was held or failed", () => {
+    expect(passToastMessage({ submitted: [], waiting: ["a", "b"], referralDrafts: ["a"] })).toBe(
+      "Nothing prepared this pass. 2 waiting on you. 1 referral ask drafted.",
+    );
+    expect(passToastMessage({ submitted: [], waiting: [], referralDrafts: [], failed: ["x"] })).toBe(
+      "Nothing prepared this pass. 1 couldn't be prepared.",
     );
   });
 
@@ -65,5 +99,38 @@ describe("statsModel and initials", () => {
     expect(initials("Capital One")).toBe("CO");
     expect(initials("stripe")).toBe("S");
     expect(initials("  ")).toBe("?");
+  });
+});
+
+describe("heldNote", () => {
+  it("says nothing will be sent for a closed posting", () => {
+    const note = heldNote({ held: APPLICATION_REASONS.postingClosed, recordable: false });
+    expect(note).toBe("This posting has closed, so nothing will be sent for it.");
+  });
+
+  it("asks for a reload when the release check could not run", () => {
+    expect(heldNote({ held: RELEASE_UNAVAILABLE, recordable: false })).toBe("Inroad couldn't run the release check. Reload to try again.");
+  });
+
+  it("promises a rule-held row comes back on its own", () => {
+    expect(heldNote({ held: "Weekly limit reached", recordable: false })).toMatch(/becomes ready again on its own/);
+  });
+
+  it("explains an already released packet, whatever the reason", () => {
+    expect(heldNote({ held: APPLICATION_REASONS.postingClosed, recordable: true })).toMatch(/Muse already received this packet/);
+  });
+
+  it("is null for a row that is not held", () => {
+    expect(heldNote({ held: null, recordable: true })).toBeNull();
+  });
+});
+
+describe("emptyActivityCopy", () => {
+  it("points at the Run button when a campaign is active", () => {
+    expect(emptyActivityCopy(true)).toBe("Nothing yet. Run this week's pass above, or press Prepare on a job.");
+  });
+
+  it("asks for a campaign first when none is active", () => {
+    expect(emptyActivityCopy(false)).toBe("Nothing yet. Approve or resume a campaign to get started.");
   });
 });

@@ -42,3 +42,16 @@ test("signed-out pages pass axe too", async ({ page }) => {
     await expectNoAxeViolations(page, path);
   }
 });
+
+test("the connector scope radios keep their natural size instead of stretching across the row", async ({ page }) => {
+  await signUpAndOnboard(page, uniqueEmail("radio"));
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/settings");
+    const readOnly = page.getByRole("radio", { name: /^Read only/ });
+    await expect(readOnly).toBeVisible();
+    const box = await readOnly.boundingBox();
+    expect(box, `radio box at ${viewport.width}px`).not.toBeNull();
+    expect(box?.width ?? Infinity, `radio width at ${viewport.width}px`).toBeLessThan(30);
+  }
+});

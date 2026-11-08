@@ -2,8 +2,9 @@
 
 import { useActionState, useId, useState, type ChangeEvent } from "react";
 import { Button } from "@/components/ui";
-import { MAX_RESUME_BYTES, MAX_RESUME_MB, RESUME_ACCEPT } from "@/lib/resume/constants";
+import { MAX_RESUME_MB, RESUME_ACCEPT } from "@/lib/resume/constants";
 import { IDLE_RESUME_STATE, type ResumeActionState } from "./action-state";
+import { activeChoice, chooseFile, type FileChoice } from "./file-choice";
 
 export type ResumeFormAction = (prev: ResumeActionState, formData: FormData) => Promise<ResumeActionState>;
 
@@ -13,29 +14,19 @@ export interface ResumeUploadFormProps {
   submitLabel?: string;
 }
 
-const ALLOWED_EXTENSION = /\.(pdf|docx|txt)$/i;
-
-/** Quick client-side check; the server re-checks size and magic bytes. */
-function clientProblem(file: File | undefined): string | null {
-  if (!file) return null;
-  if (!ALLOWED_EXTENSION.test(file.name)) return "Upload a PDF, DOCX or TXT file.";
-  if (file.size === 0) return "That file is empty.";
-  if (file.size > MAX_RESUME_BYTES) return `That file is larger than ${MAX_RESUME_MB} MB. Upload a smaller file.`;
-  return null;
-}
-
 export function ResumeUploadForm({ action, submitLabel = "Upload resume" }: ResumeUploadFormProps) {
   const [state, formAction, pending] = useActionState(action, IDLE_RESUME_STATE);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [hasFile, setHasFile] = useState(false);
+  const [choice, setChoice] = useState<FileChoice | null>(null);
+  // A new action result means React reset the form, so the earlier pick (and its problem) is gone.
+  const picked = activeChoice(choice, state);
+  const hasFile = picked !== null;
+  const localError = picked?.problem ?? null;
   const inputId = useId();
   const hintId = `${inputId}-hint`;
   const errorId = `${inputId}-error`;
 
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    setHasFile(Boolean(file));
-    setLocalError(clientProblem(file));
+    setChoice(chooseFile(event.target.files?.[0], state));
   };
 
   const error = localError ?? (state.status === "error" ? state.message : null);

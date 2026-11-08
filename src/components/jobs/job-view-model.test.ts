@@ -268,6 +268,14 @@ describe("safePostingUrl / emptyFeedCopy", () => {
       expect(emptyFeedCopy(filter).title.length).toBeGreaterThan(0);
     }
     expect(emptyFeedCopy("warm").body).toMatch(/Warm paths/);
+    expect(emptyFeedCopy("warm").addContacts).toBe(true);
+    expect(emptyFeedCopy("intern").addContacts).toBe(false);
+  });
+
+  it("doesn't tell the user to add contacts when their contacts failed to load", () => {
+    const copy = emptyFeedCopy("warm", { contactsAvailable: false });
+    expect(copy).toEqual({ title: "Warm paths aren't shown right now", body: "Inroad couldn't load your contacts. Reload to try again.", addContacts: false });
+    expect(emptyFeedCopy("intern", { contactsAvailable: false })).toEqual(emptyFeedCopy("intern"));
   });
 
   it("exposes the posting link and application status on cards", () => {
