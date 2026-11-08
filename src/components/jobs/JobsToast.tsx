@@ -27,6 +27,22 @@ export function useJobsToast(): ToastApi {
   return api;
 }
 
+function ToastPill({ toast, onDismiss }: { toast: ToastMessage; onDismiss: () => void }) {
+  return (
+    <div key={toast.id} className={`toast flex flex-wrap items-center gap-3 max-w-[calc(100vw-32px)]${toast.tone === "error" ? " error" : ""}`}>
+      <span>{toast.text}</span>
+      {toast.activityLink ? (
+        <Link href="/activity" className="underline underline-offset-2">
+          Open Activity
+        </Link>
+      ) : null}
+      <button type="button" className="toast-close" onClick={onDismiss} aria-label="Dismiss message">
+        ×
+      </button>
+    </div>
+  );
+}
+
 export function JobsToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
@@ -44,20 +60,12 @@ export function JobsToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
+      {/* Both regions stay mounted: successes are announced politely, errors assertively. */}
       <div role="status" aria-live="polite" aria-atomic="true">
-        {toast ? (
-          <div key={toast.id} className="toast flex flex-wrap items-center gap-3 max-w-[calc(100vw-32px)]">
-            <span>{toast.text}</span>
-            {toast.activityLink ? (
-              <Link href="/activity" className="underline underline-offset-2">
-                Open Activity
-              </Link>
-            ) : null}
-            <button type="button" className="bg-transparent border-0 text-inherit px-1" onClick={() => setToast(null)} aria-label="Dismiss message">
-              ×
-            </button>
-          </div>
-        ) : null}
+        {toast?.tone === "ok" ? <ToastPill toast={toast} onDismiss={() => setToast(null)} /> : null}
+      </div>
+      <div role="alert" aria-atomic="true">
+        {toast?.tone === "error" ? <ToastPill toast={toast} onDismiss={() => setToast(null)} /> : null}
       </div>
     </ToastContext.Provider>
   );

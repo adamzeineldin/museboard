@@ -66,7 +66,10 @@ export default async function JobsPage({ searchParams }: JobsPageProps) {
           {empty.body}
         </EmptyState>
       ) : (
-        <section className="feed" aria-label="Job matches">
+        <section className="feed" aria-labelledby="feed-title">
+          <h2 id="feed-title" className="sr-only">
+            Job matches
+          </h2>
           {feed.cards.map((card) => (
             <JobCard key={card.id} card={card} hasResume={feed.resume !== null} prepare={prepareJobAction} />
           ))}

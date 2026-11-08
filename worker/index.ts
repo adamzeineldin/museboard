@@ -1,10 +1,12 @@
 import "dotenv/config";
 import { db } from "@/lib/db";
+import { sendWeeklyDigests } from "@/lib/digest";
 import { recomputeMatches } from "@/lib/matching";
 import { parseWorkerArgs } from "./args";
+import { runDigestJob } from "./digest";
 import { formatSummary, runPass, type Logger } from "./pass";
 import { runScraper } from "./runScraper";
-import { exclusive, registerSchedules, SCRAPE_CRON, type StoppableTask } from "./schedule";
+import { DIGEST_CRON, exclusive, registerSchedules, SCRAPE_CRON, type StoppableTask } from "./schedule";
 
 // Entry point. Run through tsx with the react-server condition so `server-only` imports resolve:
 //   npm run worker        -> one pass now (unless --no-initial), then every 6 hours
@@ -52,9 +54,17 @@ async function main(argv: readonly string[]): Promise<void> {
     },
     () => logger.warn("[worker] previous run still in progress; skipping this one"),
   );
-  // MILESTONE 8 HOOK: pass `digest` here to schedule the weekly digest (see worker/schedule.ts).
-  const tasks = registerSchedules({ scrape });
-  logger.info(`[worker] scheduled scrape "${SCRAPE_CRON}" (UTC)${args.initialRun ? "; running once now" : ""}`);
+  // MILESTONE 8 HOOK: the weekly digest (src/lib/digest). Manual run: worker/digest-once.ts.
+  const digest = exclusive(
+    async () => {
+      await runDigestJob({ send: (now) => sendWeeklyDigests(now), logger });
+    },
+    () => logger.warn("[worker] previous digest run still in progress; skipping this one"),
+  );
+  const tasks = registerSchedules({ scrape, digest });
+  logger.info(
+    `[worker] scheduled scrape "${SCRAPE_CRON}" and weekly digest "${DIGEST_CRON}" (UTC)${args.initialRun ? "; running a scrape now" : ""}`,
+  );
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {

@@ -96,15 +96,33 @@ describe("submit_application", () => {
     expect(result).toMatchObject({ isError: true, text: `Inroad won't release this application: ${RULE_REASONS.paused}` });
   });
 
+  it("does not hand out the packet through a repeat prepare_application once the rule check rejects it", async () => {
+    const id = await prepare(JOB_IDS.stripe);
+    await setCampaignStatus(world.user.id, "paused");
+    const again = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
+    expect(again).toMatchObject({
+      isError: false,
+      data: { applicationId: id, status: "prepared", ok: false, reason: `Held: ${RULE_REASONS.paused}`, packet: null },
+    });
+    expect(JSON.stringify(again)).not.toContain("jobs.example.com");
+
+    await setCampaignStatus(world.user.id, "active");
+    const resumed = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
+    expect(resumed.data).toMatchObject({ applicationId: id, ok: true, reason: RULE_REASONS.fits });
+    expect(resumed.data.packet).toMatchObject({ applyUrl: expect.stringContaining("jobs.example.com") });
+  });
+
   it("refuses a campaign-prepared application over the weekly cap but allows the one the user approved", async () => {
     const stripe = await prepare(JOB_IDS.stripe);
-    await prepare(JOB_IDS.datadog);
+    const datadog = await prepare(JOB_IDS.datadog);
     const cloudflare = await prepare(JOB_IDS.cloudflare);
     expect(await db.application.findUniqueOrThrow({ where: { id: cloudflare } })).toMatchObject({ status: "waiting", reason: RULE_REASONS.weeklyLimit });
     await approveWaiting(world.user.id, cloudflare); // the user says yes: now 3 committed this week (cap 2)
 
-    const over = await call(client, "submit_application", { applicationId: stripe });
+    // The user's approval takes a slot, so the newest campaign-prepared row goes over the cap; the older one still fits.
+    const over = await call(client, "submit_application", { applicationId: datadog });
     expect(over).toMatchObject({ isError: true, text: `Inroad won't release this application: ${RULE_REASONS.weeklyLimit}` });
+    expect((await call(client, "submit_application", { applicationId: stripe })).isError).toBe(false);
     const approved = await call(client, "submit_application", { applicationId: cloudflare });
     expect(approved.isError).toBe(false);
     expect(approved.data.applyUrl).toContain(encodeURIComponent(JOB_IDS.cloudflare));

@@ -19,7 +19,7 @@ const notWaiting = (verb: string) =>
   new ApplicationError("invalid_state", `Only applications waiting on you can be ${verb}.`);
 
 /** Waiting -> prepared, decided by the user. Builds the packet so it is ready to submit. */
-export async function approveWaiting(userId: string, applicationId: string): Promise<Application> {
+export async function approveWaiting(userId: string, applicationId: string, now: Date = new Date()): Promise<Application> {
   const application = await loadOwnedApplication(userId, applicationId);
   if (application.status === "prepared" && application.decidedBy === "user") return application;
   if (application.status !== "waiting") throw notWaiting("approved");
@@ -29,7 +29,6 @@ export async function approveWaiting(userId: string, applicationId: string): Pro
     loadJobOrThrow(db, application.jobId),
     db.resume.findUnique({ where: { id: application.resumeId } }),
   ]);
-  const now = new Date();
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "waiting" },

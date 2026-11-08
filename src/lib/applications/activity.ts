@@ -4,6 +4,7 @@ import { getCampaignState } from "@/lib/campaign";
 import { db } from "@/lib/db";
 import { parseApplicationPacket, type ApplicationPacket } from "@/lib/packet-types";
 import { actorSchema, applicationStatusSchema, type Actor, type ApplicationStatus } from "@/lib/types";
+import { getReleaseVerdicts, type ReleaseVerdict } from "./release";
 import { countWeek } from "./week-count";
 
 // Data for the Activity page: every application with its job, resume, packet and audit trail.
@@ -28,6 +29,8 @@ export interface ActivityItem {
   packet: ApplicationPacket | null;
   createdAt: Date;
   submittedAt: Date | null;
+  /** Prepared rows only: whether the packet may be released right now (same verdict as getSubmissionPacket). */
+  release: ReleaseVerdict | null;
   /** Newest first. */
   events: ActivityEvent[];
 }
@@ -78,7 +81,7 @@ export function sortActivity(items: readonly ActivityItem[]): ActivityItem[] {
 }
 
 export async function getActivity(userId: string, timeZone: string, now: Date = new Date()): Promise<ActivityData> {
-  const [applications, events, count, state] = await Promise.all([
+  const [applications, events, count, state, verdicts] = await Promise.all([
     db.application.findMany({
       where: { userId },
       include: { job: { include: { company: true } }, resume: { select: { filename: true } } },
@@ -92,6 +95,7 @@ export async function getActivity(userId: string, timeZone: string, now: Date = 
     }),
     countWeek(db, userId, now, timeZone),
     getCampaignState(userId),
+    getReleaseVerdicts(userId, now),
   ]);
   const eventsById = groupEvents(events);
   const items = applications.map((app): ActivityItem => ({
@@ -106,6 +110,7 @@ export async function getActivity(userId: string, timeZone: string, now: Date = 
     packet: parseApplicationPacket(app.packet),
     createdAt: app.createdAt,
     submittedAt: app.submittedAt,
+    release: verdicts.get(app.id) ?? null,
     events: eventsById.get(app.id) ?? [],
   }));
   const countOf = (status: ApplicationStatus) => items.filter((item) => item.status === status).length;

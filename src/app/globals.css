@@ -1,12 +1,15 @@
 @import "tailwindcss";
 @import "./styles/components.css";
 
-/* Design tokens ported verbatim from docs/reference/inroad.html.
-   --sans / --mono put the next/font families (set on <html> in the root layout) first. */
+/* Design tokens ported from docs/reference/inroad.html.
+   --sans / --mono put the next/font families (set on <html> in the root layout) first.
+   Accessibility changes (milestone 8, WCAG 2.1 AA 4.5:1 for small text; audited by src/app/styles/contrast.test.ts):
+   light --accent-fg #FFFFFF -> #042419 (white on #10B47E was 2.67:1; now 6.17:1, the dark theme's ink),
+   light --warm #A35F06 -> #965705 (warm chip was 4.45:1 on --warm-soft; now 5.10:1). Dark tokens unchanged. */
 :root{
   --bg:#F4F7F6; --surface:#FFFFFF; --surface-2:#EEF3F1; --fg:#14201C; --muted:#5E6C67; --line:#E1E8E5;
-  --accent:#10B47E; --accent-ink:#0A7A56; --accent-fg:#FFFFFF; --accent-soft:#E2F6EE; --ring-track:#DCEDE6;
-  --warm:#A35F06; --warm-soft:#FDF0DC; --hold:#B23B2B; --hold-soft:#FCE6E2; --ok:#0A7A56; --ok-soft:#E2F6EE;
+  --accent:#10B47E; --accent-ink:#0A7A56; --accent-fg:#042419; --accent-soft:#E2F6EE; --ring-track:#DCEDE6;
+  --warm:#965705; --warm-soft:#FDF0DC; --hold:#B23B2B; --hold-soft:#FCE6E2; --ok:#0A7A56; --ok-soft:#E2F6EE;
   --shadow:0 1px 2px rgba(20,32,28,.04),0 4px 14px rgba(20,32,28,.05);
   --sans:var(--font-jakarta), "Plus Jakarta Sans", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --mono:var(--font-plex-mono), "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -59,7 +62,12 @@
   h3{font-size:1.05rem;font-weight:700;line-height:1.35}
   p{margin:0}
   button{font:inherit;cursor:pointer}
-  a{color:inherit}
-  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* An explicit token, not `inherit`: Chrome keeps an inherited link colour from the old scheme when the
+     colour scheme changes while the page is open (caught by the axe run in dark mode). */
+  a{color:var(--fg)}
+  /* Plain text links (no component class) are underlined so they never rely on colour alone (1.4.1). */
+  a:not([class]){text-decoration:underline;text-underline-offset:2px}
+  :focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
   input,select,textarea{font:inherit;font-size:.9rem;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
 }

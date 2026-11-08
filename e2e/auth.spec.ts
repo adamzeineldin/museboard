@@ -1,23 +1,7 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { readMagicLink as readLink } from "./support/auth";
 
-// API-level magic-link flow (no browser needed): request link -> read .dev-mail -> follow -> onboarding.
-
-function recipientFile(email: string): string {
-  return path.resolve(".dev-mail", `${email.toLowerCase().replace(/[^a-z0-9.-]/g, "_")}.txt`);
-}
-
-async function readLink(email: string): Promise<string> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      return (await readFile(recipientFile(email), "utf8")).trim();
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-  throw new Error(`No magic link was written for ${email}`);
-}
+// API-level magic-link flow (no browser needed): request link -> read the run's mail dir -> follow -> onboarding.
 
 async function requestMagicLink(request: APIRequestContext, email: string) {
   const csrf = await request.get("/api/auth/csrf");

@@ -39,7 +39,7 @@ export function ContactList({ contacts, selectedId, kind }: ContactListProps) {
                 size="small"
                 variant={selected ? "primary" : "default"}
                 aria-current={selected ? "true" : undefined}
-                aria-label={selected ? `Drafting an ask to ${contact.name}` : `Draft an ask to ${contact.name}`}
+                aria-label={selected ? `Drafting ask to ${contact.name}` : `Draft ask to ${contact.name}`}
                 scroll={false}
               >
                 {selected ? "Drafting" : "Draft ask"}

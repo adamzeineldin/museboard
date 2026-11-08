@@ -7,7 +7,7 @@ import { getDefaultResume } from "./deps";
 import { ApplicationError } from "./errors";
 import type { JobWithCompany } from "./packet";
 import type { StoredCheckResult } from "./types";
-import { countWeek } from "./week-count";
+import { countAhead, countWeek, type RankedApplication } from "./week-count";
 
 export async function loadUserOrThrow(client: DbClient, userId: string): Promise<User> {
   const user = await client.user.findUnique({ where: { id: userId } });
@@ -43,13 +43,17 @@ interface RunCheckInput {
   timeZone: string;
   now: Date;
   excludeApplicationId?: string;
+  /** Re-check an existing prepared application at release time: count only the rows ranked ahead of it. */
+  rankAgainst?: RankedApplication;
 }
 
 /** Run checkApplication with live data: the version in force, the user's match and this week's count. */
 export async function runCheck(client: DbClient, input: RunCheckInput): Promise<CheckRun> {
   const [match, count]: [Match | null, number] = await Promise.all([
     client.match.findUnique({ where: { userId_jobId: { userId: input.userId, jobId: input.job.id } } }),
-    countWeek(client, input.userId, input.now, input.timeZone, input.excludeApplicationId),
+    input.rankAgainst
+      ? countAhead(client, input.userId, input.rankAgainst, input.now, input.timeZone)
+      : countWeek(client, input.userId, input.now, input.timeZone, input.excludeApplicationId),
   ]);
   const result = checkApplication(
     { companyName: input.job.company.name, type: input.job.type },
@@ -74,7 +78,12 @@ export async function runCheck(client: DbClient, input: RunCheckInput): Promise<
 export const toJson = (value: unknown): Prisma.InputJsonValue => value as Prisma.InputJsonValue;
 
 /** User + rule context for one rule check (the user's zone drives the ISO week and endsOn). */
-export async function loadEvalContext(client: DbClient, userId: string): Promise<{ user: User; rule: RuleContext }> {
+export interface EvalContext {
+  user: User;
+  rule: RuleContext;
+}
+
+export async function loadEvalContext(client: DbClient, userId: string): Promise<EvalContext> {
   const user = await loadUserOrThrow(client, userId);
   return { user, rule: await loadRuleCampaign(userId, user.timezone, client) };
 }

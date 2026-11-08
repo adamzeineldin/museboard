@@ -48,7 +48,7 @@ export function SentToggle({ target, sent, contactName }: SentToggleProps) {
       type="button"
       className="toggle"
       aria-pressed={optimisticSent}
-      aria-label={`Mark message to ${contactName} as sent`}
+      aria-label={`Mark as sent: message to ${contactName}`}
       onClick={toggle}
       disabled={pending || (target.type === "preview" && optimisticSent)}
     >

@@ -84,12 +84,13 @@ export function companyState(draft: CampaignDraft, name: string): CompanyState {
 export interface CompanyChipModel {
   state: CompanyState;
   label: string;
-  ariaLabel: string;
+  /** Spoken state, read after the visible name (the chip's accessible name comes from its text). */
+  spoken: string;
 }
 
 export function companyChipModel(draft: CampaignDraft, name: string): CompanyChipModel {
   const state = companyState(draft, name);
-  return { state, label: CHIP_LABEL[state], ariaLabel: `${name}: ${CHIP_SPOKEN[state]}. Activate to change.` };
+  return { state, label: CHIP_LABEL[state], spoken: CHIP_SPOKEN[state] };
 }
 
 /** auto -> ask first -> skip -> auto. Lists stay in display order. Returns a new draft. */

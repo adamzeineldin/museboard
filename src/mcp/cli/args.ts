@@ -12,7 +12,7 @@ const argsSchema = z.object({
 export type CreateTokenArgs = z.infer<typeof argsSchema>;
 
 export const CREATE_TOKEN_USAGE =
-  'Usage: npx tsx --conditions=react-server src/mcp/cli/create-token.ts <email> [--scope read|write] [--name "Muse review"]';
+  'Usage: npm run mcp:token -- <email> [--scope read|write] [--name "Muse review"]';
 
 export function parseCreateTokenArgs(argv: readonly string[]): CreateTokenArgs {
   const values: Record<string, string> = { scope: "write", name: "Muse review" };

@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestUser, db, resetDb } from "@/test/db";
 
-const { loadRuleCampaign, weekCount, contactsByCompany } = vi.hoisted(() => ({
+const { loadRuleCampaign, weekCount, contactsByCompany, getReleaseVerdicts } = vi.hoisted(() => ({
   loadRuleCampaign: vi.fn(),
   weekCount: vi.fn(),
   contactsByCompany: vi.fn(),
+  getReleaseVerdicts: vi.fn(),
 }));
 vi.mock("@/lib/campaign", () => ({ loadRuleCampaign }));
-vi.mock("@/lib/applications", () => ({ weekCount }));
+vi.mock("@/lib/applications", () => ({ weekCount, getReleaseVerdicts }));
 vi.mock("@/lib/outreach", () => ({ contactsByCompany }));
 
 import { loadJobsFeed } from "./feed-data";
@@ -33,6 +34,43 @@ describe("loadJobsFeed", () => {
     loadRuleCampaign.mockResolvedValue({ ruleCampaign: { status: "active", inForce: { rules: RULES }, timeZone: "America/New_York" } });
     weekCount.mockResolvedValue(0);
     contactsByCompany.mockResolvedValue(new Map());
+    getReleaseVerdicts.mockResolvedValue(new Map());
+  });
+
+  it("renders an empty feed when there are no jobs at all", async () => {
+    const user = await createTestUser();
+    const feed = await loadJobsFeed({ id: user.id, timezone: "UTC" }, { filter: "recommended", limit: 50, now: NOW });
+    expect(feed).toMatchObject({ cards: [], totalOpen: 0, totalFiltered: 0, newMatchCount: 0, hasMore: false, resume: null });
+  });
+
+  it("a prepared application's chip follows the release check (same verdict as getSubmissionPacket)", async () => {
+    const { user } = await seed();
+    const resume = await db.resume.create({ data: { userId: user.id, filename: "r.pdf", storageKey: "k", isDefault: true } });
+    const base = { userId: user.id, resumeId: resume.id, status: "prepared", decidedBy: "campaign", reason: "Fits campaign rules" };
+    const held = await db.application.create({ data: { ...base, jobId: "s1" } });
+    await db.application.create({ data: { ...base, jobId: "m1" } });
+    getReleaseVerdicts.mockResolvedValue(new Map([[held.id, { allowed: false, reason: "Weekly limit reached" }]]));
+
+    const feed = await loadJobsFeed({ id: user.id, timezone: "UTC" }, { filter: "recommended", limit: 50, now: NOW });
+    const chips = new Map(feed.cards.map((c) => [c.id, c.chip]));
+    expect(chips.get("s1")).toEqual({ tone: "hold", label: "Held: Weekly limit reached" });
+    // No verdict for m1 (e.g. the check failed to load): never claimed ready.
+    expect(chips.get("m1")).toEqual({ tone: "hold", label: "Held: Release check unavailable" });
+    expect(getReleaseVerdicts).toHaveBeenCalledWith(user.id, NOW);
+  });
+
+  it("logs and holds prepared cards when the release check fails to load", async () => {
+    const { user } = await seed();
+    const resume = await db.resume.create({ data: { userId: user.id, filename: "r.pdf", storageKey: "k", isDefault: true } });
+    await db.application.create({
+      data: { userId: user.id, resumeId: resume.id, jobId: "s1", status: "prepared", decidedBy: "campaign", reason: "Fits campaign rules" },
+    });
+    getReleaseVerdicts.mockRejectedValue(new Error("boom"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const feed = await loadJobsFeed({ id: user.id, timezone: "UTC" }, { filter: "recommended", limit: 50, now: NOW });
+    expect(feed.cards.find((c) => c.id === "s1")?.chip.label).toBe("Held: Release check unavailable");
+    expect(errorSpy).toHaveBeenCalledWith("[jobs] loading release verdicts failed", expect.objectContaining({ userId: user.id }));
+    errorSpy.mockRestore();
   });
 
   it("shows open jobs only, with scores, skills, chips and warm paths, loading rules once", async () => {

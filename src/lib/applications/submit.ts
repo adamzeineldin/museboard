@@ -4,13 +4,13 @@ import type { Application } from "@/generated/prisma/client";
 import { writeAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { parseApplicationPacket, type ApplicationPacket } from "@/lib/packet-types";
-import { RULE_REASONS } from "@/lib/rules";
 import type { Actor } from "@/lib/types";
 import { parseActorOrThrow } from "./client";
-import { loadEvalContext, loadJobOrThrow, runCheck } from "./context";
+import { loadEvalContext, loadJobOrThrow } from "./context";
 import { loadOwnedApplication } from "./decide";
-import { APPLICATION_REASONS, ApplicationError, isApplicationError } from "./errors";
+import { ApplicationError, isApplicationError } from "./errors";
 import { buildApplicationPacket } from "./packet";
+import { releaseVerdict, statusRefusal, type ReleaseVerdict } from "./release";
 import type { SubmissionPacketResult } from "./types";
 
 export const CONFIRMATION_MAX = 2000;
@@ -21,30 +21,11 @@ const confirmationSchema = z
   .max(CONFIRMATION_MAX, `Keep the confirmation under ${CONFIRMATION_MAX} characters.`)
   .optional();
 
-type Decision = { allowed: true; reason: string } | { allowed: false; reason: string };
-
-function statusRefusal(application: Application): string | null {
-  if (application.status === "submitted") return "Already submitted.";
-  if (application.status === "skipped") return "You skipped this application.";
-  if (application.status !== "prepared") return `Waiting on your approval: ${application.reason}`;
-  return null;
-}
-
-/** prepared AND (approved by the user OR the rule check passes right now, not counting itself). */
-async function decideRelease(userId: string, application: Application, now: Date): Promise<Decision> {
+/** prepared AND (approved by the user OR the rule check passes right now). See ./release.ts. */
+async function decideRelease(userId: string, application: Application, now: Date): Promise<ReleaseVerdict> {
   const refusal = statusRefusal(application);
   if (refusal) return { allowed: false, reason: refusal };
-  if (application.decidedBy === "user") return { allowed: true, reason: APPLICATION_REASONS.approvedByYou };
-  const [{ user, rule }, job] = await Promise.all([loadEvalContext(db, userId), loadJobOrThrow(db, application.jobId)]);
-  const { result } = await runCheck(db, {
-    userId,
-    job,
-    rule,
-    timeZone: user.timezone,
-    now,
-    excludeApplicationId: application.id,
-  });
-  return result.ok ? { allowed: true, reason: RULE_REASONS.fits } : { allowed: false, reason: result.reason };
+  return releaseVerdict(await loadEvalContext(db, userId), application, now);
 }
 
 async function packetFor(userId: string, application: Application): Promise<{ packet: ApplicationPacket; applyUrl: string }> {
@@ -84,7 +65,7 @@ export async function getSubmissionPacket(
     allowed: decision.allowed,
     reason: decision.reason,
   });
-  if (!decision.allowed) return decision;
+  if (!decision.allowed) return { allowed: false, reason: decision.reason };
   const { packet, applyUrl } = await packetFor(userId, application);
   return { allowed: true, packet, applyUrl };
 }

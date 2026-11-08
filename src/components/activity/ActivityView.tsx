@@ -27,9 +27,10 @@ export function ActivityView({ rows, stats, campaignActive }: ActivityViewProps)
   const run = (action: () => Promise<ActivityActionResult>) =>
     startTransition(async () => {
       try {
-        toast.show((await action()).message);
+        const outcome = await action();
+        toast.show(outcome.message, outcome.ok ? "ok" : "error");
       } catch {
-        toast.show("We couldn't reach Inroad. Check your connection and try again.");
+        toast.show("We couldn't reach Inroad. Check your connection and try again.", "error");
       }
     });
 
@@ -69,7 +70,7 @@ export function ActivityView({ rows, stats, campaignActive }: ActivityViewProps)
           ))}
         </ul>
       )}
-      <Toast message={toast.message} />
+      <Toast message={toast.message} tone={toast.tone} />
     </>
   );
 }

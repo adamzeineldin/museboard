@@ -123,9 +123,10 @@ export function RulesFields(props: RulesFieldsProps) {
             {companies.map((name) => {
               const chip = companyChipModel(draft, name);
               return (
-                <button key={name} type="button" className="co" data-s={chip.state} aria-label={chip.ariaLabel} onClick={() => onCycleCompany(name)}>
+                <button key={name} type="button" className="co" data-s={chip.state} aria-describedby="companies-hint" onClick={() => onCycleCompany(name)}>
                   {name}
                   <em aria-hidden="true">{chip.label}</em>
+                  <span className="sr-only">: {chip.spoken}</span>
                 </button>
               );
             })}

@@ -16,6 +16,8 @@
     "db:seed": "prisma db seed",
     "worker": "tsx --conditions=react-server worker/index.ts",
     "scrape:once": "tsx --conditions=react-server worker/index.ts --once",
+    "digest:once": "tsx --conditions=react-server worker/digest-once.ts",
+    "mcp:token": "tsx --conditions=react-server src/mcp/cli/create-token.ts",
     "e2e": "playwright test",
     "postinstall": "prisma generate"
   },
@@ -39,6 +41,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.65.0",
     "@tailwindcss/turbopack": "4.3.5",
     "@types/better-sqlite3": "7.6.13",

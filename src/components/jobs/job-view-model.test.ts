@@ -98,7 +98,27 @@ describe("statusChip", () => {
     expect(statusChip(ok, { status: "submitted", decidedBy: "user" })).toEqual({ tone: "ok", label: "Applied · approved by you" });
     expect(statusChip(ok, { status: "waiting", decidedBy: "campaign" })).toEqual({ tone: "hold", label: "Waiting on you" });
     expect(statusChip(ok, { status: "skipped", decidedBy: "user" })).toEqual({ tone: "neutral", label: "Skipped" });
-    expect(statusChip(null, { status: "prepared", decidedBy: "campaign" })).toEqual({ tone: "ok", label: "Ready to submit" });
+    const fits = { allowed: true, reason: RULE_REASONS.fits };
+    expect(statusChip(null, { status: "prepared", decidedBy: "campaign", release: fits })).toEqual({ tone: "ok", label: "Ready to submit" });
+  });
+
+  it("agrees with the release check for prepared applications (same verdict as getSubmissionPacket)", () => {
+    const ok = { ok: true, reason: RULE_REASONS.fits };
+    const overCap = { allowed: false, reason: RULE_REASONS.weeklyLimit };
+    expect(statusChip(ok, { status: "prepared", decidedBy: "campaign", release: overCap })).toEqual({
+      tone: "hold",
+      label: "Held: Weekly limit reached",
+    });
+    expect(statusChip(ok, { status: "prepared", decidedBy: "campaign", release: { allowed: false, reason: "Campaign is paused" } })).toEqual({
+      tone: "hold",
+      label: "Held: Campaign is paused",
+    });
+    expect(statusChip(ok, { status: "prepared", decidedBy: "user", release: { allowed: true, reason: "Approved by you" } })).toEqual({
+      tone: "ok",
+      label: "Ready to submit",
+    });
+    // No verdict loaded: never claim it is ready.
+    expect(statusChip(ok, { status: "prepared", decidedBy: "campaign" })).toEqual({ tone: "hold", label: "Held: Release check unavailable" });
   });
 });
 

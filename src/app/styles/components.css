@@ -12,7 +12,7 @@
 
   /* Nav rail */
   .rail{background:var(--surface);border-right:1px solid var(--line);padding:20px 14px 20px max(14px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:22px;position:sticky;top:0;height:100vh}
-  .brand{display:flex;align-items:center;gap:10px;padding:0 8px;text-decoration:none;color:inherit}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 8px;text-decoration:none;color:var(--fg)}
   .brand .mark{width:30px;height:30px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
   .brand b{font-weight:800;font-size:1.25rem;letter-spacing:-.03em}
   .nav{display:flex;flex-direction:column;gap:2px}
@@ -20,7 +20,7 @@
   .nav a:hover{background:var(--surface-2);color:var(--fg)}
   .nav a[aria-current="page"]{background:var(--accent-soft);color:var(--accent-ink)}
   .nav svg{width:19px;height:19px;flex:none}
-  .nav .n{margin-left:auto;font-size:.72rem;background:var(--hold);color:#fff;border-radius:999px;padding:0 7px;font-weight:700}
+  .nav .n{margin-left:auto;font-size:.72rem;background:var(--hold);color:var(--surface);border-radius:999px;padding:0 7px;font-weight:700}
   .camp-card{margin-top:auto;background:var(--surface-2);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;font-size:.82rem}
   .camp-card .btn{text-decoration:none;text-align:center}
   .meter{height:6px;border-radius:99px;background:var(--ring-track);overflow:hidden}
@@ -113,6 +113,11 @@
   .opts{display:flex;gap:8px;flex-wrap:wrap}
   .toggle{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:6px 14px;font-size:.85rem;font-weight:600}
   .toggle[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
+  .switch-btn{display:inline-flex;align-items:center;gap:10px}
+  .switch-track{width:34px;height:20px;border-radius:999px;background:var(--line);border:1px solid var(--muted);position:relative;flex:none}
+  .switch-thumb{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:1px solid var(--muted)}
+  .switch-btn[aria-checked="true"] .switch-track{background:var(--accent-ink);border-color:var(--accent-ink)}
+  .switch-btn[aria-checked="true"] .switch-thumb{left:16px;border-color:var(--accent-ink)}
   .opts .co{border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:10px;padding:7px 11px;font-size:.85rem;font-weight:600;display:inline-flex;gap:6px;align-items:center}
   .opts .co[data-s="auto"]{background:var(--accent-soft);border-color:var(--accent);color:var(--fg)}
   .opts .co[data-s="ask"]{background:var(--warm-soft);border-color:var(--warm);color:var(--fg)}
@@ -157,8 +162,15 @@
   .muse-f{padding:14px 18px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;font-size:.8rem}
   .empty{padding:32px 16px;text-align:center;color:var(--muted);font-size:.9rem;display:flex;flex-direction:column;gap:10px;align-items:center}
   .empty b{color:var(--fg)}
+  .skeleton{height:84px;border-radius:16px;background:var(--surface-2);border:1px solid var(--line)}
+  @media (prefers-reduced-motion:no-preference){.skeleton{animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.55}}}
   .error-state{border:1px solid var(--hold-soft);background:var(--surface);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
   .error-state b{color:var(--hold)}
+  .toast[hidden]{display:none}
+  .toast a{color:var(--bg)}
+  .toast.error a{color:var(--surface)}
+  .toast-close{background:transparent;border:0;color:inherit;min-width:24px;min-height:24px;padding:0 4px}
+  .toast.error{background:var(--hold);color:var(--surface)}
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:.88rem;font-weight:600;z-index:20}
 
   /* Sign-in and onboarding */

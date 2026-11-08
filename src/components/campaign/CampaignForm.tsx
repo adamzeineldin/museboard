@@ -54,10 +54,10 @@ export function CampaignForm(props: CampaignFormProps) {
     startTransition(async () => {
       try {
         const outcome = await action();
-        toast.show(outcome.message);
+        toast.show(outcome.message, outcome.ok ? "ok" : "error");
         if (outcome.ok) after?.();
       } catch {
-        toast.show("We couldn't reach Inroad. Check your connection and try again.");
+        toast.show("We couldn't reach Inroad. Check your connection and try again.", "error");
       }
     });
   const withRules = (action: (rules: CampaignRules) => Promise<CampaignActionResult>) => () => {
@@ -101,7 +101,7 @@ export function CampaignForm(props: CampaignFormProps) {
         onCancel={() => setRevokeOpen(false)}
         onConfirm={() => run(() => setCampaignStatusAction("revoked"), () => setRevokeOpen(false))}
       />
-      <Toast message={toast.message} />
+      <Toast message={toast.message} tone={toast.tone} />
     </>
   );
 }

@@ -131,7 +131,7 @@ npm run dev                                     # or build + start on the test h
 2. Settings → upload a resume (e.g. `src/lib/resume/__fixtures__/resume.pdf`) so jobs get match scores.
 3. Create a token: Settings → **Connect Muse** → name it, choose **Read and write**, copy it. Or from the shell:
    ```bash
-   npx tsx --conditions=react-server src/mcp/cli/create-token.ts demo@inroad.test --scope write --name "Muse review"
+   npm run mcp:token -- demo@inroad.test --scope write --name "Muse review"
    ```
    (prints the token once on stdout; `--scope read` for the read-only check).
 4. Add the connector in Muse with `<APP_URL>/mcp` and the token. Suggested script: `find_roles` → `get_campaign`

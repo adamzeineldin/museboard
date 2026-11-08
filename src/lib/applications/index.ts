@@ -7,6 +7,7 @@ export { approveWaiting, skipWaiting } from "./decide";
 export { APPLICATION_REASONS, ApplicationError, isApplicationError, type ApplicationErrorCode } from "./errors";
 export { evaluateJobForUser } from "./evaluate";
 export { prepareApplication } from "./prepare";
+export { checkRelease, getReleaseVerdicts, type ReleaseVerdict } from "./release";
 export { CONFIRMATION_MAX, getSubmissionPacket, recordSubmission } from "./submit";
 export type { EvaluationResult, StoredCheckResult, SubmissionPacketResult, WeeklyPassSummary } from "./types";
 export { weekCount } from "./week-count";

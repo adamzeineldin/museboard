@@ -1,6 +1,6 @@
 import "server-only";
 import { evaluateJobs } from "@/components/jobs/rule-batch";
-import { weekCount } from "@/lib/applications";
+import { getReleaseVerdicts, weekCount } from "@/lib/applications";
 import { loadRuleCampaign } from "@/lib/campaign";
 import { db } from "@/lib/db";
 import { contactsByCompany } from "@/lib/outreach";
@@ -42,12 +42,13 @@ export async function findRoles(userId: string, filters: RoleFilters, now: Date)
     include: { company: { select: { name: true } } },
   });
   const jobIds = jobs.map((job) => job.id);
-  const [matches, applications, contacts, rule, count] = await Promise.all([
+  const [matches, applications, contacts, rule, count, verdicts] = await Promise.all([
     db.match.findMany({ where: { userId, jobId: { in: jobIds } }, select: { jobId: true, score: true } }),
-    db.application.findMany({ where: { userId, jobId: { in: jobIds } }, select: { id: true, jobId: true, status: true, reason: true } }),
+    db.application.findMany({ where: { userId, jobId: { in: jobIds } }, select: { id: true, jobId: true, status: true, reason: true, decidedBy: true } }),
     contactsByCompany(userId),
     loadRuleCampaign(userId, user.timezone),
     weekCount(userId, now, user.timezone),
+    getReleaseVerdicts(userId, now),
   ]);
 
   const scores = new Map(matches.map((m) => [m.jobId, m.score]));
@@ -55,7 +56,7 @@ export async function findRoles(userId: string, filters: RoleFilters, now: Date)
   return buildRoleRows({
     jobs: jobs.map((job) => ({ ...job, companyName: job.company.name })),
     scores,
-    applications: new Map(applications.map((a) => [a.jobId, a])),
+    applications: new Map(applications.map((a) => [a.jobId, { ...a, release: verdicts.get(a.id) ?? null }])),
     ruleResults: evaluateJobs(batch, scores, { available: true, campaign: rule.ruleCampaign, weekCount: count }, now),
     contactCounts: new Map([...contacts].map(([companyId, list]) => [companyId, list.length])),
   });

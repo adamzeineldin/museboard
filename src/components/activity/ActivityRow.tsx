@@ -4,6 +4,7 @@ import { Button, Chip } from "@/components/ui";
 import type { ActivityRowModel } from "./rows";
 import { initials } from "./view-model";
 import { PacketView } from "./PacketView";
+import { heldLabel } from "../release/release-view";
 
 export interface ActivityRowProps {
   row: ActivityRowModel;
@@ -27,6 +28,9 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
       </>
     );
   }
+  if (row.status === "prepared" && row.held) {
+    return <Chip tone="hold">{heldLabel(row.held)}</Chip>;
+  }
   if (row.status === "prepared") {
     return (
       <>
@@ -36,7 +40,7 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
             Open application
           </a>
         ) : null}
-        <Button size="small" variant="primary" onClick={() => onMarkSubmitted(row.id)} disabled={busy} aria-label={`Mark ${name} as submitted`}>
+        <Button size="small" variant="primary" onClick={() => onMarkSubmitted(row.id)} disabled={busy} aria-label={`Mark as submitted: ${name}`}>
           Mark as submitted
         </Button>
       </>
@@ -66,7 +70,13 @@ export function ActivityRow(props: ActivityRowProps) {
         <RowActions {...props} />
       </div>
       <div className="col-span-full flex flex-col gap-2">
-        {row.status === "prepared" && row.packet ? <PacketView packet={row.packet} /> : null}
+        {row.status === "prepared" && row.held ? (
+          <p className="muted text-[.82rem]">
+            Inroad won&apos;t release this packet while the rule check says no. It becomes ready again on its own once your
+            rules allow it (for example next week, or after you resume the campaign).
+          </p>
+        ) : null}
+        {row.status === "prepared" && !row.held && row.packet ? <PacketView packet={row.packet} /> : null}
         <details className="text-sm">
           <summary className="muted cursor-pointer">History ({row.history.length})</summary>
           {row.history.length === 0 ? (

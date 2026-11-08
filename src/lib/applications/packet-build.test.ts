@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleApplicationPacket, STANDARD_NOTES, type PacketInputs } from "./packet-build";
+import { assembleApplicationPacket, NO_RESUME_NOTE, PROFILE_NOTE, STANDARD_NOTES, type PacketInputs } from "./packet-build";
 
 const input: PacketInputs = {
   job: { id: "j1", title: "SWE Intern", url: "https://jobs.example.com/1" },
@@ -30,7 +30,14 @@ describe("assembleApplicationPacket", () => {
     expect(packet.resume).toBeNull();
     expect(packet.answers).toEqual({ fullName: "", email: "x@example.com", school: "", gradYear: null });
     expect(packet.tailoredSummary).toBe("The candidate is a student applying for SWE Intern at Stripe.");
-    expect(packet.notes).toContain("No resume on file: the user needs to upload one before submitting.");
-    expect(packet.notes).toContain("Confirm school and graduation year with the user.");
+    expect(packet.notes).toEqual([...STANDARD_NOTES, NO_RESUME_NOTE, PROFILE_NOTE]);
+  });
+
+  it("words notes about the applicant, never as an order to 'the user' (they show on the web as-is)", () => {
+    const notes = assembleApplicationPacket({ ...input, resume: null, user: { ...input.user, school: null } }).notes;
+    for (const note of notes) {
+      expect(note).not.toMatch(/ask the user|the user/i);
+      expect(note).toMatch(/applicant/);
+    }
   });
 });

@@ -62,8 +62,8 @@ describe("JobCard markup", () => {
     expect(waiting).toMatch(/>Prepare<span class="sr-only">/);
   });
 
-  it("renders an always-present live region for toasts", () => {
-    expect(render(null)).toBe('<div role="status" aria-live="polite" aria-atomic="true"></div>');
+  it("renders always-present live regions for toasts (status for success, alert for errors)", () => {
+    expect(render(null)).toBe('<div role="status" aria-live="polite" aria-atomic="true"></div><div role="alert" aria-atomic="true"></div>');
   });
 });
 

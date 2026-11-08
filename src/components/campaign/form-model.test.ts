@@ -55,7 +55,7 @@ describe("campaign form model", () => {
   });
 
   it("describes each chip's state for sight and screen readers", () => {
-    expect(companyChipModel(draft, "Stripe")).toEqual({ state: "auto", label: "auto", ariaLabel: "Stripe: auto-apply. Activate to change." });
+    expect(companyChipModel(draft, "Stripe")).toEqual({ state: "auto", label: "auto", spoken: "auto-apply" });
     expect(companyChipModel(draft, "Meta").label).toBe("ask first");
     expect(companyChipModel(draft, "Palantir")).toMatchObject({ state: "off", label: "skip" });
   });

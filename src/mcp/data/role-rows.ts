@@ -1,3 +1,4 @@
+import { heldLabel, heldReason, type ReleaseLike } from "@/components/release/release-view";
 import type { RuleCheckResult } from "@/lib/rules";
 import type { RoleStatus } from "../schemas";
 
@@ -21,6 +22,9 @@ export interface RoleApplicationInput {
   id: string;
   status: string;
   reason: string;
+  decidedBy?: string;
+  /** Prepared applications: the release verdict (getReleaseVerdicts), so find_roles agrees with submit_application. */
+  release?: ReleaseLike | null;
 }
 
 export interface RoleRow {
@@ -56,6 +60,10 @@ export function roleStatus(
   application: RoleApplicationInput | undefined,
   rule: RuleCheckResult | null | undefined,
 ): { status: RoleStatus; reason: string } {
+  if (application?.status === "prepared" && application.release !== undefined) {
+    const held = heldReason(application.decidedBy ?? "campaign", application.release);
+    if (held) return { status: "held", reason: heldLabel(held) };
+  }
   if (application && APPLICATION_STATUSES.has(application.status)) {
     return { status: application.status as RoleStatus, reason: application.reason };
   }

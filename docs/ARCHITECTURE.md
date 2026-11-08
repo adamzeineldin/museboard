@@ -23,11 +23,13 @@ src/lib/matching/           embedder interface, local embedder, scoring, recompu
 src/lib/resume/             upload storage + text extraction (pdf, docx, txt)
 src/lib/outreach/           contacts, CSV import, draft generation, referral packet, best contact
 src/lib/audit.ts            writeAudit(userId, actor, action, payload)
-src/lib/digest/             weekly digest builder + mailer
-src/mcp/                    createInroadMcpServer(userId, scope), tool definitions, token auth
+src/lib/digest/             weekly digest builder + mailer, signed pause/unsubscribe links, Settings preference
+src/lib/connector/          connector tokens (create, verify, list, revoke) + Settings actions
+src/mcp/                    createInroadMcpServer({ userId, scope, now? }), tool definitions, /mcp HTTP pipeline, CLI
+src/app/pause, src/app/digest/unsubscribe   signed-out pages behind the digest's signed links
 scraper/                    Python package (stdlib only). `python -m scraper` prints jobs JSON. unittest in scraper/tests
 worker/                     TS: run scraper, upsert jobs, close missing, recompute matches; node-cron schedule (6h) + weekly digest
-e2e/                        Playwright happy path (milestone 8)
+e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA) in light + dark, auth (milestone 8)
 ```
 
 ## Conventions
@@ -68,7 +70,13 @@ e2e/                        Playwright happy path (milestone 8)
 `weekCount(userId, now, tz)` counts this user's applications in the current ISO week (Monday 00:00 in the user's
 timezone) that are **committed to go out**: `submitted` (by `submittedAt`) plus `prepared` (by `decidedAt`).
 Counting `prepared` is deliberate: otherwise one weekly pass could clear 20 jobs before any is submitted and blow the cap.
-When re-checking a specific application at submit time, exclude that application from the count.
+When re-checking a specific **campaign-prepared** application at release time (`getSubmissionPacket`, and the web via
+`getReleaseVerdicts`/`checkRelease`), the count is the rows ranked ahead of it (`countAhead` in `week-count.ts`): this
+week's submitted rows, every row the user approved this week, and the campaign-prepared rows decided this week before it
+(by `decidedAt`, then `createdAt`, then `id`). So a user approval over the cap pushes the newest campaign-prepared row
+over, never the older ones (cap 2, two campaign-prepared, the user approves a third: exactly one campaign row reads
+`Weekly limit reached`). A row prepared in an earlier week goes last: it is checked against everything committed this
+week, excluding itself. User-approved rows are always releasable.
 
 ## Campaign versions
 - Newest version with `approvedAt` set is in force. A newer unapproved version is "pending" and changes nothing.
@@ -157,3 +165,48 @@ company in `autoCompanies` or `askFirstCompanies`, type in `roles`, score >= `mi
 creates a `referral_ask` draft for `bestContactAt` (if any, and no draft already exists for that contact+job).
 Jobs outside the campaign are not turned into applications by the pass; the Jobs feed still shows their held reason
 from `evaluateJobForUser`. A user clicking **Prepare** on any open job always creates an Application (prepared or waiting), provided they have a resume.
+
+## Contract additions recorded at the milestone 7-8 integration
+```ts
+// src/lib/applications (release check, shared by Muse and the web)
+getReleaseVerdicts(userId, now?): Promise<Map<applicationId, { allowed, reason }>>   // prepared rows only, read-only, no audit
+checkRelease(userId, applicationId, now?): Promise<{ allowed, reason }>             // read-only; the web checks it before "Mark as submitted"
+getSubmissionPacket(...)                                                           // same verdict, plus the packet; audits application.packet_requested
+approveWaiting(userId, applicationId, now?)                                        // optional now (tests)
+getActivity(...).items[].release: { allowed, reason } | null                       // Activity shows a refused prepared row as "Held: <reason>"
+// The Jobs card chip and find_roles use the same verdicts: a refused prepared row is "Held: <reason>" (find_roles status 'held').
+// src/lib/connector
+createConnectorToken(userId, name, scope) => { token /* shown once */, record }; verifyBearer(header); listTokens(userId); revokeToken(userId, id)
+// src/mcp
+createInroadMcpServer({ userId, scope, now? })    // read-scope tokens only get the 3 Read tools
+get_campaign also returns defaultResume: { resumeId, filename } | null
+// src/lib/digest
+buildDigest(userId, now, config?) => { status: 'skipped', reason } | { status: 'ready', to, data, links, message: { subject, text, html } }
+sendWeeklyDigests(now?, deps?) => { users, sent, skipped, failed }
+inspectPauseLink / pauseCampaignFromLink, inspectUnsubscribeLink / unsubscribeFromLink (token, now?) => { status, message }
+signLinkToken / verifyLinkToken                   // HMAC-SHA256, key derived from AUTH_SECRET, 14-day expiry
+setDigestEnabled(userId, enabled) => { enabled, changed }   // Settings "Weekly digest" switch (User.digestOptOut)
+```
+Audit actions added: `muse.<tool>` (actor muse, every tool call incl. failures, non-sensitive args + summary),
+`connector.token_created`, `connector.token_revoked`, `digest.sent` (actor inroad; payload weekStart, used to skip re-sends),
+`campaign.paused_via_email` (actor user, in addition to the service's `campaign.paused`), `digest.unsubscribed_via_email`,
+`digest.preference_changed` (actor user, `{ enabled, via: 'settings' }`, only on a change).
+
+CLI: `npm run mcp:token -- <email> [--scope read|write] [--name ...]` (prints a token once), `npm run digest:once`.
+`/mcp`, `/.well-known/oauth-protected-resource`, `/pause` and `/digest/*` are public (no session); `/pause` and `/digest`
+are listed in `PUBLIC_TOKEN_PREFIXES` (src/lib/protected-routes.ts).
+
+Packet notes (`ApplicationPacket.notes`) are worded about "the applicant", so the same line reads naturally on the web
+(shown to the applicant under "Inroad leaves these to you") and to Muse (which asks them).
+
+## Accessibility (milestone 8)
+- Every page: one h1, `main` landmark, skip link, labelled controls, `aria-current` on nav, `aria-pressed` on toggles,
+  `role="switch"` for the digest setting, visible `:focus-visible` ring (`--accent-ink`), `prefers-reduced-motion` honoured.
+- Action results: successes in a polite `role="status"` region, errors in `role="alert"`; both regions stay mounted.
+- Route states: each signed-in route has `loading.tsx` (heading + placeholders, `role="status"`) and `error.tsx`
+  (heading + safe message + **Try again** calling `retry()`); `not-found.tsx` at the root and in the app shell; `global-error.tsx`.
+- Contrast: `src/app/styles/contrast.test.ts` checks every text token pair at 4.5:1 and the focus ring at 3:1, light and dark.
+  Token changes: light `--accent-fg` `#FFFFFF` -> `#042419` (white on the green accent was 2.67:1, now 6.17:1) and light
+  `--warm` `#A35F06` -> `#965705` (warm chip 4.45:1 -> 5.10:1). Links use `color: var(--fg)` (not `inherit`, which Chrome
+  keeps from the old scheme on a live theme switch) and plain text links are underlined.
+- E2E runs axe (WCAG 2.0/2.1 A+AA, best practices, and target-size 24px) on every signed-in page in light and dark.

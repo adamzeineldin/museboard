@@ -6,8 +6,9 @@ import cron, { type TaskOptions } from "node-cron";
 export const SCRAPE_CRON = "0 */6 * * *";
 
 /**
- * MILESTONE 8 HOOK (weekly digest): Monday 13:00 UTC. The digest job decides per user (timezone,
- * digestOptOut) what to send; replace this pattern if milestone 8 needs a different cadence.
+ * MILESTONE 8 (weekly digest): Monday 13:00 UTC. By then the previous ISO week has ended in every time
+ * zone (UTC-12 to UTC+14), so each user's digest reports their week that just finished; src/lib/digest
+ * decides per user (zone, digestOptOut) what to send.
  */
 export const DIGEST_CRON = "0 13 * * 1";
 
@@ -15,7 +16,7 @@ export const SCHEDULE_TIMEZONE = "UTC";
 
 export interface WorkerJobs {
   scrape: () => Promise<void>;
-  /** MILESTONE 8 HOOK: pass the weekly digest job here (src/lib/digest) to schedule it. */
+  /** MILESTONE 8: the weekly digest job (worker/digest.ts), scheduled with DIGEST_CRON. */
   digest?: () => Promise<void>;
 }
 
@@ -32,7 +33,7 @@ export function registerSchedules(jobs: WorkerJobs, scheduler: Scheduler = cron)
   const base = { timezone: SCHEDULE_TIMEZONE, noOverlap: true } as const;
   const tasks = [scheduler.schedule(SCRAPE_CRON, jobs.scrape, { ...base, name: "scrape" })];
 
-  // ---- MILESTONE 8 HOOK: weekly digest is registered here once worker/index.ts passes `digest`. ----
+  // ---- MILESTONE 8: weekly digest, passed by worker/index.ts. ----
   if (jobs.digest) {
     tasks.push(scheduler.schedule(DIGEST_CRON, jobs.digest, { ...base, name: "weekly-digest" }));
   }

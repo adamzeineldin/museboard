@@ -1,5 +1,5 @@
 import "server-only";
-import { weekCount } from "@/lib/applications";
+import { getReleaseVerdicts, weekCount, type ReleaseVerdict } from "@/lib/applications";
 import { loadRuleCampaign } from "@/lib/campaign";
 import { db } from "@/lib/db";
 import { parseMatchReasons } from "@/lib/matching/score";
@@ -43,6 +43,16 @@ async function loadRuleInputs(user: FeedUser, now: Date): Promise<RuleInputs> {
   }
 }
 
+async function loadVerdicts(userId: string, now: Date): Promise<Map<string, ReleaseVerdict>> {
+  try {
+    return await getReleaseVerdicts(userId, now);
+  } catch (error) {
+    // Prepared cards then read "Held: Release check unavailable"; nothing claims to be ready.
+    console.error("[jobs] loading release verdicts failed", { userId, error: errorDetail(error) });
+    return new Map();
+  }
+}
+
 async function loadContacts(userId: string): Promise<Map<string, FeedContact[]> | null> {
   try {
     const grouped = await contactsByCompany(userId);
@@ -55,13 +65,14 @@ async function loadContacts(userId: string): Promise<Map<string, FeedContact[]> 
 
 export async function loadJobsFeed(user: FeedUser, options: FeedOptions): Promise<JobsFeedData> {
   const now = options.now ?? new Date();
-  const [resume, jobs, matches, applications, contacts, rules] = await Promise.all([
+  const [resume, jobs, matches, applications, contacts, rules, verdicts] = await Promise.all([
     getDefaultResume(user.id),
     db.job.findMany({ where: { closedAt: null }, include: { company: { select: { name: true } } } }),
     db.match.findMany({ where: { userId: user.id, job: { closedAt: null } }, select: { jobId: true, score: true, reasons: true } }),
-    db.application.findMany({ where: { userId: user.id }, select: { jobId: true, status: true, decidedBy: true } }),
+    db.application.findMany({ where: { userId: user.id }, select: { id: true, jobId: true, status: true, decidedBy: true } }),
     loadContacts(user.id),
     loadRuleInputs(user, now),
+    loadVerdicts(user.id, now),
   ]);
 
   const result = buildJobCards({
@@ -79,7 +90,9 @@ export async function loadJobsFeed(user: FeedUser, options: FeedOptions): Promis
       companyName: job.company.name,
     })),
     matches: new Map(matches.map((m) => [m.jobId, { score: m.score, skills: parseMatchReasons(m.reasons).skills }])),
-    applications: new Map(applications.map((a) => [a.jobId, { status: a.status, decidedBy: a.decidedBy }])),
+    applications: new Map(
+      applications.map((a) => [a.jobId, { status: a.status, decidedBy: a.decidedBy, release: verdicts.get(a.id) ?? null }]),
+    ),
     contacts: contacts ?? new Map(),
     rules,
     filter: options.filter,

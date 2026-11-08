@@ -10,12 +10,18 @@ export interface PacketInputs {
   fitLines: FitSummary;
 }
 
-/** Fields Inroad never answers on the user's behalf. */
+/**
+ * Fields Inroad never answers on the applicant's behalf. Worded about "the applicant" so the same
+ * line reads naturally on the web (shown to the applicant) and to Muse (which asks them).
+ */
 export const STANDARD_NOTES = [
-  "Work authorization and visa sponsorship: Inroad doesn't know. Ask the user.",
-  "Voluntary self-identification (demographic) questions: leave these to the user.",
-  "Start date, availability and relocation: confirm with the user.",
+  "Work authorization and visa sponsorship: Inroad never answers these. The applicant answers them.",
+  "Voluntary self-identification (demographic) questions: left to the applicant.",
+  "Start date, availability and relocation: the applicant confirms these.",
 ] as const;
+
+export const NO_RESUME_NOTE = "No resume on file: the applicant uploads one before submitting.";
+export const PROFILE_NOTE = "School and graduation year are missing: the applicant confirms them.";
 
 function tailoredSummary(input: PacketInputs): string {
   const name = input.user.name?.trim() || "The candidate";
@@ -27,10 +33,10 @@ function tailoredSummary(input: PacketInputs): string {
 }
 
 function extraNotes(input: PacketInputs): string[] {
-  const notes: string[] = [];
-  if (!input.resume) notes.push("No resume on file: the user needs to upload one before submitting.");
-  if (!input.user.school?.trim() || !input.user.gradYear) notes.push("Confirm school and graduation year with the user.");
-  return notes;
+  return [
+    ...(input.resume ? [] : [NO_RESUME_NOTE]),
+    ...(!input.user.school?.trim() || !input.user.gradYear ? [PROFILE_NOTE] : []),
+  ];
 }
 
 export function assembleApplicationPacket(input: PacketInputs): ApplicationPacket {

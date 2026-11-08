@@ -1,6 +1,7 @@
 import type { ApplicationPacket } from "@/lib/packet-types";
 import type { Actor, ApplicationStatus } from "@/lib/types";
 import { formatDateTime } from "../campaign/format";
+import { heldReason, type ReleaseLike } from "../release/release-view";
 import { describeAuditEvent } from "./view-model";
 
 // Pure: turn activity items into serializable row models with times already formatted in the user's zone.
@@ -15,6 +16,8 @@ export interface ActivityItemLike {
   jobUrl: string;
   resumeFilename: string | null;
   packet: ApplicationPacket | null;
+  /** Prepared rows: the release verdict (null when not loaded). */
+  release: ReleaseLike | null;
   events: Array<{ id: string; actor: Actor; action: string; payload: Record<string, unknown>; createdAt: Date }>;
 }
 
@@ -28,6 +31,8 @@ export interface ActivityRowModel {
   jobUrl: string;
   resumeFilename: string | null;
   packet: ApplicationPacket | null;
+  /** Prepared rows the release check refuses right now: the reason. Null when releasable or not prepared. */
+  held: string | null;
   history: Array<{ id: string; text: string; when: string; iso: string }>;
 }
 
@@ -52,6 +57,7 @@ export function toRowModels(items: readonly ActivityItemLike[], timeZone: string
     jobUrl: safeHttpUrl(item.jobUrl) ?? "",
     resumeFilename: item.resumeFilename,
     packet: item.packet,
+    held: item.status === "prepared" ? heldReason(item.decidedBy, item.release) : null,
     history: item.events.map((event) => ({
       id: event.id,
       text: describeAuditEvent(event),

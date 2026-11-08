@@ -21,6 +21,19 @@ describe("roleStatus", () => {
     });
   });
 
+  it("reports a prepared application the release check refuses as held, like submit_application would", () => {
+    const ok = { ok: true, reason: "Fits campaign rules" };
+    const prepared = { id: "a", status: "prepared", reason: "Fits campaign rules", decidedBy: "campaign" };
+    expect(roleStatus({ ...prepared, release: { allowed: false, reason: "Weekly limit reached" } }, ok)).toEqual({
+      status: "held",
+      reason: "Held: Weekly limit reached",
+    });
+    expect(roleStatus({ ...prepared, release: { allowed: true, reason: "Fits campaign rules" } }, ok)).toEqual({
+      status: "prepared",
+      reason: "Fits campaign rules",
+    });
+  });
+
   it("maps the rule check to will_auto_apply, referral_first or held", () => {
     expect(roleStatus(undefined, { ok: true, reason: "Fits campaign rules" }).status).toBe("will_auto_apply");
     expect(roleStatus(undefined, { ok: false, reason: "Top choice: referral first", topChoice: true }).status).toBe("referral_first");

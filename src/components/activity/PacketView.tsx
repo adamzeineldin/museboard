@@ -40,7 +40,7 @@ export function PacketView({ packet }: { packet: ApplicationPacket }) {
         </div>
         {packet.notes.length > 0 ? (
           <div>
-            <span className="label">You&apos;ll need to answer</span>
+            <span className="label">Inroad leaves these to you</span>
             <ul className="m-0 mt-1 list-disc pl-5">
               {packet.notes.map((note) => (
                 <li key={note}>{note}</li>

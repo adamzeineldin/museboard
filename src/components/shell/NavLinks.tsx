@@ -21,9 +21,12 @@ export function NavLinks({ waitingCount }: NavLinksProps) {
             </svg>
             {item.label}
             {badge ? (
-              <span className="n" aria-label={`${badge} waiting on you`}>
-                {badge}
-              </span>
+              <>
+                <span className="n" aria-hidden="true">
+                  {badge}
+                </span>
+                <span className="sr-only">, {badge} waiting on you</span>
+              </>
             ) : null}
           </Link>
         );

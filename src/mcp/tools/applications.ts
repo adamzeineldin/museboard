@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type { Application } from "@/generated/prisma/client";
-import { CONFIRMATION_MAX, getSubmissionPacket, prepareApplication, recordSubmission } from "@/lib/applications";
+import { checkRelease, CONFIRMATION_MAX, getSubmissionPacket, prepareApplication, recordSubmission } from "@/lib/applications";
 import { ApplicationPacketSchema, parseApplicationPacket } from "@/lib/packet-types";
 import { ToolRefusal } from "../errors";
 import { ApplicationStatusOutput, idSchema, isoString } from "../schemas";
@@ -25,7 +25,7 @@ export const prepareApplicationTool = defineTool({
     `Runs the rule check against ${RULE_SUMMARY}.`,
     "If it passes, the application is prepared (cleared to submit) and the packet is returned.",
     "If not, the application waits for the user to approve or skip it in Inroad, and the reason is returned (for a top-choice company Inroad also drafts a referral ask, never sent).",
-    "Calling it again for the same job returns the existing application, re-checked only while it is waiting.",
+    "Calling it again for the same job returns the existing application, re-checked only while it is waiting; a prepared application that the rules no longer allow comes back held, without its packet.",
   ].join(" "),
   input: z.strictObject({ jobId: idSchema("jobId") }),
   hints: { destructiveHint: false, idempotentHint: true },
@@ -43,7 +43,12 @@ export const prepareApplicationTool = defineTool({
   async run(ctx, input) {
     const application = await prepareApplication(ctx.userId, input.jobId, "muse", ctx.now());
     const status = ApplicationStatusOutput.parse(application.status);
-    const ok = status === "prepared" || status === "submitted";
+    // A prepared row is returned as-is on a repeat call, so re-run the release check: its packet goes out only
+    // while submit_application would release it right now (same verdict as find_roles' "Held: ..." rows).
+    const release = status === "prepared" ? await checkRelease(ctx.userId, application.id, ctx.now()) : null;
+    const held = release !== null && !release.allowed;
+    const ok = !held && (status === "prepared" || status === "submitted");
+    const reason = held ? `Held: ${release.reason}` : application.reason;
     return {
       data: {
         applicationId: application.id,
@@ -51,13 +56,15 @@ export const prepareApplicationTool = defineTool({
         status,
         decidedBy: application.decidedBy,
         ok,
-        reason: application.reason,
+        reason,
         topChoice: topChoiceOf(application),
-        packet: parseApplicationPacket(application.packet),
+        packet: held ? null : parseApplicationPacket(application.packet),
       },
-      summary: ok
-        ? `Application is ${status}: ${application.reason}.`
-        : `Application is waiting on the user: ${application.reason}.`,
+      summary: held
+        ? `Application is held, nothing is released: ${release.reason}.`
+        : ok
+          ? `Application is ${status}: ${application.reason}.`
+          : `Application is waiting on the user: ${application.reason}.`,
     };
   },
 });

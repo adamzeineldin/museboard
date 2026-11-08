@@ -2,6 +2,7 @@ import { formatRelative } from "@/components/shell/format";
 import { warmPathsHref } from "@/components/warm-paths/selection";
 import type { ChipTone } from "@/components/ui/Chip";
 import type { RuleCheckResult } from "@/lib/rules";
+import { heldLabel, heldReason, type ReleaseLike } from "../release/release-view";
 import { evaluateJobs, type RuleInputs } from "./rule-batch";
 
 // Pure view model for the Jobs feed (prototype vMatches). The page loads rows; this decides what
@@ -41,6 +42,8 @@ export interface FeedMatch {
 export interface FeedApplication {
   status: string;
   decidedBy: string;
+  /** Prepared applications: the release verdict (getReleaseVerdicts). */
+  release?: ReleaseLike | null;
 }
 
 export interface FeedContact {
@@ -123,7 +126,6 @@ export function showMoreHref(filter: JobFilter, limit: number): string {
 }
 
 const APPLICATION_CHIPS: Record<string, StatusChipModel> = {
-  prepared: { tone: "ok", label: "Ready to submit" },
   waiting: { tone: "hold", label: "Waiting on you" },
   skipped: { tone: "neutral", label: "Skipped" },
 };
@@ -133,6 +135,10 @@ export function statusChip(result: RuleCheckResult | null, application: FeedAppl
   if (application) {
     if (application.status === "submitted") {
       return { tone: "ok", label: application.decidedBy === "user" ? "Applied · approved by you" : "Applied" };
+    }
+    if (application.status === "prepared") {
+      const held = heldReason(application.decidedBy, application.release);
+      return held ? { tone: "hold", label: heldLabel(held) } : { tone: "ok", label: "Ready to submit" };
     }
     const chip = APPLICATION_CHIPS[application.status];
     if (chip) return chip;
