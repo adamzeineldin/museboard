@@ -101,4 +101,27 @@ draftOutreach(userId, contactId, kind: 'coffee_chat'|'referral_ask', jobId?): Pr
 recomputeMatches(userId): Promise<number>
 // src/lib/audit
 writeAudit(userId, actor: 'user'|'inroad'|'muse', action: string, payload: unknown): Promise<void>
+// added for milestones 4-6
+// src/lib/matching (pure module fit-summary.ts, no server-only)
+fitSummary(resumeText: string, job: { title, description, companyName }): [string, string, string]   // three short lines
+// src/lib/outreach
+contactsByCompany(userId): Promise<Map<string /*companyId*/, Contact[]>>   // warm-path chip + filter
+buildReferralPacket(userId, jobId | null, contactId): Promise<ReferralPacket>
+// src/lib/resume
+getDefaultResume(userId): Promise<Resume|null>;  resumeDownloadPath(resumeId) => `/api/resumes/${id}` (auth-checked route)
 ```
+
+## Packets (src/lib/packet-types.ts, pure types + zod, owned by milestone 5)
+```ts
+ReferralPacket  = { role: { jobId, title, company, url } | null, fitSummary: string[3], resume: { id, filename, downloadPath } | null }
+ApplicationPacket = ReferralPacket & { applyUrl, answers: { fullName, email, school, gradYear, location? }, tailoredSummary: string,
+                    notes: string[] /* fields Inroad cannot answer, e.g. work authorization: the user or Muse must ask */ }
+```
+
+## Weekly pass candidates
+"New matches" for `runWeeklyPass` = open jobs (closedAt null) with a Match for the user, no Application yet,
+company in `autoCompanies` or `askFirstCompanies`, type in `roles`, score >= `minMatch`. Each goes through
+`prepareApplication`: ok -> `prepared`; failure (top choice, weekly limit) -> `waiting` with the reason; top choice also
+creates a `referral_ask` draft for `bestContactAt` (if any, and no draft already exists for that contact+job).
+Jobs outside the campaign are not turned into applications by the pass; the Jobs feed still shows their held reason
+from `evaluateJobForUser`. A user clicking **Prepare** on any job always creates an Application (prepared or waiting).
