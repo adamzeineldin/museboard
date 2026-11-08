@@ -1,5 +1,5 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DELETE, GET, POST } from "@/app/mcp/route";
 import { approveWaiting } from "@/lib/applications";
 import { setCampaignStatus } from "@/lib/campaign";
@@ -12,6 +12,9 @@ import { studentWithCampaign, tokenFor, type McpWorld } from "../testing/world";
 
 // Application, outreach and weekly-pass tools through an MCP client against the real /mcp route.
 // The world's approved campaign: auto Stripe/Datadog/Cloudflare/Ramp (interns), Meta ask-first, cap 2.
+
+/** Wednesday 2026-11-11 12:00 in New York: far from Monday 00:00, so the weekly cap never straddles two weeks. */
+const MID_WEEK = new Date("2026-11-11T17:00:00Z");
 
 let server: TestHttpServer;
 let restoreStorage: () => void;
@@ -27,12 +30,19 @@ afterAll(async () => {
   restoreStorage();
 });
 beforeEach(async () => {
+  // Only Date is faked (timers stay real, so HTTP works). The route runs in-process, so ctx.now() follows it.
+  // The clock keeps ticking from MID_WEEK, so rows prepared one after another get distinct decidedAt values.
+  vi.useFakeTimers({ toFake: ["Date"], now: MID_WEEK, shouldAdvanceTime: true, advanceTimeDelta: 1 });
   await resetDb();
   world = await studentWithCampaign();
   client = await connectClient(server.url, await tokenFor(world.user.id));
 });
 afterEach(async () => {
-  await client.close();
+  try {
+    await client.close();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 async function prepare(jobId: string): Promise<string> {
@@ -117,6 +127,9 @@ describe("submit_application", () => {
     const datadog = await prepare(JOB_IDS.datadog);
     const cloudflare = await prepare(JOB_IDS.cloudflare);
     expect(await db.application.findUniqueOrThrow({ where: { id: cloudflare } })).toMatchObject({ status: "waiting", reason: RULE_REASONS.weeklyLimit });
+    // The ranking is by decidedAt, so the test exercises the documented order rather than an id tie-break.
+    const [stripeRow, datadogRow] = await Promise.all([stripe, datadog].map((id) => db.application.findUniqueOrThrow({ where: { id } })));
+    expect(stripeRow.decidedAt!.getTime()).toBeLessThan(datadogRow.decidedAt!.getTime());
     await approveWaiting(world.user.id, cloudflare); // the user says yes: now 3 committed this week (cap 2)
 
     // The user's approval takes a slot, so the newest campaign-prepared row goes over the cap; the older one still fits.

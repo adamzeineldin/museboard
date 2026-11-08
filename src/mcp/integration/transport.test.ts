@@ -114,6 +114,9 @@ describe("/mcp tool listing by scope", () => {
     expect(byName.get("submit_application")?.description).toMatch(/marks this application's packet as released/);
     expect(byName.get("submit_application")?.description).not.toMatch(/nothing else changes/);
     expect(byName.get("find_roles")?.annotations).toMatchObject({ idempotentHint: true, destructiveHint: false });
+    expect(byName.get("find_roles")?.description).toMatch(/prepared application that may not go out right now also shows as held, with its applicationId/);
+    expect(byName.get("run_weekly_pass")?.description).toMatch(/failed lists matches that could not be processed/);
+    expect(byName.get("run_weekly_pass")?.description).toMatch(/no resume is uploaded/);
     for (const tool of tools) expect(tool.description).not.toMatch(/(skip|bypass|ignore)\w* (the |its |any |Muse's )?(permission|approval|prompt|confirmation)/i);
   });
 
@@ -151,15 +154,23 @@ describe("/mcp transport guards", () => {
   it("rate limits each token to 60 requests a minute with 429 and Retry-After", async () => {
     const { user } = await studentWithCampaign();
     const token = await tokenFor(user.id);
-    const statuses: number[] = [];
-    for (let i = 0; i < 60; i += 1) statuses.push((await ping({ Authorization: `Bearer ${token}` })).status);
-    expect(statuses.every((s) => s !== 429)).toBe(true);
+    const other = await tokenFor(user.id);
+    // Freeze the clock the route's limiter reads, so a slow machine cannot refill the bucket mid-test.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 60; i += 1) statuses.push((await ping({ Authorization: `Bearer ${token}` })).status);
+      expect(statuses.every((s) => s !== 429)).toBe(true);
 
-    const limited = await ping({ Authorization: `Bearer ${token}` });
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
-    // Another token of the same user has its own bucket.
-    expect((await ping({ Authorization: `Bearer ${await tokenFor(user.id)}` })).status).not.toBe(429);
+      const limited = await ping({ Authorization: `Bearer ${token}` });
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+      // Another token of the same user has its own bucket.
+      expect((await ping({ Authorization: `Bearer ${other}` })).status).not.toBe(429);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects a foreign Origin (DNS-rebinding protection) and accepts the app's own", async () => {

@@ -28,7 +28,8 @@ export interface RateLimiter {
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const { capacity, windowMs } = options;
   const maxKeys = options.maxKeys ?? 10_000;
-  const now = options.now ?? Date.now;
+  // Read Date.now on every call (not a captured reference) so test clocks such as vi.useFakeTimers apply.
+  const now = options.now ?? (() => Date.now());
   const refillPerMs = capacity / windowMs;
   const buckets = new Map<string, Bucket>();
 
@@ -61,3 +62,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 }
 
 export const MCP_RATE_LIMIT = { capacity: 60, windowMs: 60_000 } as const;
+
+/** One shared bucket for well-formed tokens that fail verification (unknown or revoked). Missing or malformed headers are not counted. */
+export const FAILED_AUTH_RATE_LIMIT = { capacity: 300, windowMs: 60_000 } as const;
+export const FAILED_AUTH_KEY = "failed-auth";

@@ -13,8 +13,18 @@ import { defineTool } from "../tool-kit";
 const RULE_SUMMARY =
   "the user's approved campaign rules at this moment (campaign active and not ended, company on the auto-apply list, role type, minimum match, weekly limit)";
 
+type ApplicationStatus = z.output<typeof ApplicationStatusOutput>;
+
 const topChoiceOf = (application: Application): boolean =>
   z.object({ topChoice: z.boolean() }).safeParse(application.checkResult).data?.topChoice ?? false;
+
+/** The text Muse relays; a skipped row is final, so it must not read as waiting on the user. */
+function prepareSummary(status: ApplicationStatus, ok: boolean, heldReason: string | null, reason: string): string {
+  if (heldReason !== null) return `Application is held, nothing is released: ${heldReason}.`;
+  if (ok) return `Application is ${status}: ${reason}.`;
+  if (status === "skipped") return "The user skipped this application; nothing will be prepared.";
+  return `Application is waiting on the user: ${reason}.`;
+}
 
 export const prepareApplicationTool = defineTool({
   name: "prepare_application",
@@ -61,11 +71,7 @@ export const prepareApplicationTool = defineTool({
         topChoice: topChoiceOf(application),
         packet: held ? null : parseApplicationPacket(application.packet),
       },
-      summary: held
-        ? `Application is held, nothing is released: ${release.reason}.`
-        : ok
-          ? `Application is ${status}: ${application.reason}.`
-          : `Application is waiting on the user: ${application.reason}.`,
+      summary: prepareSummary(status, ok, held ? release.reason : null, application.reason),
     };
   },
 });

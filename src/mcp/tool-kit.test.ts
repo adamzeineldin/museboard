@@ -1,10 +1,16 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { ApplicationError } from "@/lib/applications";
 import { CampaignError } from "@/lib/campaign";
 import { OutreachError } from "@/lib/outreach";
+import { db } from "@/test/db";
+import { toolContext } from "./context";
 import { GENERIC_TOOL_ERROR, ToolRefusal, toolErrorMessage } from "./errors";
 import { INROAD_TOOLS, toolsForScope } from "./server";
-import { annotationsFor } from "./tool-kit";
+import { annotationsFor, defineTool } from "./tool-kit";
 
 describe("annotationsFor", () => {
   it("makes Read tools read-only and idempotent, and never open-world", () => {
@@ -53,6 +59,44 @@ describe("toolErrorMessage", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(toolErrorMessage(new Error("SELECT * FROM users"), ctx)).toBe(GENERIC_TOOL_ERROR);
     expect(log).toHaveBeenCalledWith("[mcp] tool failed", expect.objectContaining({ tool: "find_roles", userId: "u1" }));
+    log.mockRestore();
+  });
+});
+
+describe("tool call audit failure", () => {
+  const echoTool = defineTool({
+    name: "echo_tool",
+    title: "Echo",
+    museClass: "write",
+    description: "Test tool.",
+    input: z.strictObject({ word: z.string() }),
+    output: z.object({ word: z.string() }),
+    auditArgs: (input) => ({ word: input.word }),
+    run: async (_ctx, input) => ({ data: { word: input.word }, summary: `Echoed ${input.word}.` }),
+  });
+
+  async function connected(): Promise<Client> {
+    const server = new McpServer({ name: "test", version: "0.0.0" });
+    echoTool.register(server, toolContext({ userId: "u1", scope: "write" }));
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    await client.connect(clientSide);
+    return client;
+  }
+
+  it("still returns the tool's result when the muse.<tool> audit write fails, and logs no details to Muse", async () => {
+    const create = vi.spyOn(db.auditEvent, "create").mockRejectedValueOnce(new Error("SQLITE_BUSY at /secret/path"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const client = await connected();
+    const result = await client.callTool({ name: "echo_tool", arguments: { word: "hi" } });
+    await client.close();
+    create.mockRestore();
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual({ word: "hi" });
+    expect(JSON.stringify(result.content)).not.toContain("SQLITE_BUSY");
+    expect(log).toHaveBeenCalledWith("[mcp] audit write failed", expect.objectContaining({ tool: "echo_tool", userId: "u1" }));
     log.mockRestore();
   });
 });

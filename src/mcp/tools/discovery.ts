@@ -36,6 +36,7 @@ export const findRolesTool = defineTool({
     "Each role has its match score (0-100, null if not scored yet), a status, the reason for that status, and whether the user has a contact at the company (warm path).",
     "Status comes from the user's existing application when there is one (prepared, waiting, submitted, skipped);",
     "otherwise from the user's approved campaign rules: will_auto_apply, referral_first (a top-choice company: ask for a referral first) or held (the reason says why).",
+    "A prepared application that may not go out right now also shows as held, with its applicationId; the reason says why.",
     `Optional filters: type ("intern" or "newgrad"), company (name, case-insensitive), newOnly (first seen in the last ${NEW_ROLE_DAYS} days).`,
   ].join(" "),
   input: z.strictObject({
@@ -71,6 +72,7 @@ export const findWarmPathTool = defineTool({
   description: [
     "Muse class: Read. No side effects (Inroad only records that the tool was called).",
     "Lists the contacts the user saved in Inroad (entered by hand or imported from their own CSV) at one company, warmest relationship first.",
+    "company is the matched company's name, or null when the user has no saved contacts there.",
     "Use a contactId with draft_outreach to draft a coffee-chat or referral message. Inroad does not look anyone up online.",
   ].join(" "),
   input: z.strictObject({ company: companyNameSchema.describe("Company name, case-insensitive") }),
@@ -79,7 +81,9 @@ export const findWarmPathTool = defineTool({
   async run(ctx, input) {
     const companies = await findCompanies(input.company);
     const grouped = await contactsByCompany(ctx.userId);
-    const match = companies.find((company) => (grouped.get(company.id) ?? []).length > 0) ?? companies[0] ?? null;
+    // Only name a company the caller has contacts at: Company rows are shared, and a contact-only company
+    // another user created must not leak through the substring search.
+    const match = companies.find((company) => (grouped.get(company.id) ?? []).length > 0) ?? null;
     const contacts = (match ? (grouped.get(match.id) ?? []) : []).map((c) => ({
       contactId: c.id,
       name: c.name,

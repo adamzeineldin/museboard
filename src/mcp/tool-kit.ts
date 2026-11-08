@@ -62,7 +62,7 @@ export function annotationsFor(museClass: MuseClass, title: string, hints: ToolS
   };
 }
 
-async function auditCall(ctx: ToolContext, tool: string, payload: Record<string, unknown>): Promise<void> {
+export async function auditCall(ctx: ToolContext, tool: string, payload: Record<string, unknown>): Promise<void> {
   try {
     await writeAudit(ctx.userId, "muse", `muse.${tool}`, payload);
   } catch (error) {
@@ -71,7 +71,7 @@ async function auditCall(ctx: ToolContext, tool: string, payload: Record<string,
   }
 }
 
-const clip = (text: string): string => (text.length > MAX_AUDIT_SUMMARY ? `${text.slice(0, MAX_AUDIT_SUMMARY - 1)}…` : text);
+export const clipSummary = (text: string): string => (text.length > MAX_AUDIT_SUMMARY ? `${text.slice(0, MAX_AUDIT_SUMMARY - 1)}…` : text);
 
 const textResult = (text: string): CallToolResult["content"] => [{ type: "text", text }];
 
@@ -83,11 +83,11 @@ async function execute<I extends ObjectSchema, O extends ObjectSchema>(
   const args = spec.auditArgs(input);
   try {
     const { data, summary } = await spec.run(ctx, input);
-    await auditCall(ctx, spec.name, { args, ok: true, summary: clip(summary) });
+    await auditCall(ctx, spec.name, { args, ok: true, summary: clipSummary(summary) });
     return { content: textResult(summary), structuredContent: data as Record<string, unknown> };
   } catch (error) {
     const message = toolErrorMessage(error, { tool: spec.name, userId: ctx.userId });
-    await auditCall(ctx, spec.name, { args, ok: false, summary: clip(message) });
+    await auditCall(ctx, spec.name, { args, ok: false, summary: clipSummary(message) });
     return { content: textResult(message), isError: true };
   }
 }

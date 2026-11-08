@@ -14,14 +14,15 @@ Code: `src/mcp/` (server, tools, HTTP pipeline), `src/app/mcp/route.ts`, `src/ap
 | --- | --- |
 | Endpoint | `POST <APP_URL>/mcp` (local: `http://localhost:3000/mcp`) |
 | Transport | MCP streamable HTTP, **stateless**: no `Mcp-Session-Id`; every POST is answered with a JSON body (`enableJsonResponse`) |
-| `GET /mcp`, `DELETE /mcp` | `405` with `Allow: POST` (no standalone SSE stream, no session to end) |
+| `GET /mcp`, `DELETE /mcp` | `405` with `Allow: POST` (no standalone SSE stream, no session to end). The Origin, token and rate-limit checks run first, so without a valid token the answer is `401` (or `429` once the shared failed-token limit is reached, see Rate limits), and an authenticated GET or DELETE uses up one request of the token's rate limit. |
 | Request body | `Content-Type: application/json`, `Accept: application/json, text/event-stream`, at most 1 MB (`413` above) |
 | Protected-resource metadata | `GET <APP_URL>/.well-known/oauth-protected-resource` (RFC 9728) |
 | Origin | When an `Origin` header is present it must equal the origin of `APP_URL`, else `403` (DNS-rebinding protection per the MCP spec). Server-to-server calls without `Origin` are allowed. |
 | Encryption in transit | Production must be served over HTTPS only (`APP_URL=https://...`); guideline §4.4. |
 
-`APP_URL` is required in production (requests fail with `500` and a logged error until it is set); outside production it
-falls back to `AUTH_URL` and then `http://localhost:3000`.
+The app's origin comes from `APP_URL`, or from `AUTH_URL` when `APP_URL` is unset or not a valid http(s) URL. In
+production one of them must be set (requests fail with `500` and a logged error until it is); outside production the
+fallback after both is `http://localhost:3000`.
 
 ## Authentication
 
@@ -38,7 +39,8 @@ input schema is strict, so an extra `userId` argument is rejected.
   without the token.
 - **Failures.** Missing, malformed, unknown or revoked token → `401` with
   `WWW-Authenticate: Bearer resource_metadata="<APP_URL>/.well-known/oauth-protected-resource"` (plus
-  `error="invalid_token"` when a token was sent).
+  `error="invalid_token"` when a token was sent). A missing or malformed `Authorization` header always gets this `401`.
+  Too many well-formed tokens that fail verification in a minute turn their `401` into a `429` (see Rate limits).
 - **Limit.** 10 active tokens per user.
 
 ### Scopes
@@ -49,7 +51,7 @@ input schema is strict, so an extra `userId` argument is rejected.
 | `write` (Read and write) | `inroad.write` | all 10 |
 
 Write tools are not registered for a read token: they do not appear in `tools/list`, and calling one returns an error
-result (`Tool <name> not found`).
+result (`MCP error -32602: Tool <name> not found`). The attempt is audited as `muse.<tool>` with `ok: false`.
 
 ### Test vs production credentials
 
@@ -61,7 +63,12 @@ Mark tokens given to Meta reviewers as **test** in the submission form.
 
 Every tool returns `structuredContent` that matches its `outputSchema`, plus a one-sentence text summary. Every call
 writes an audit entry with actor `muse`, action `muse.<tool>`, the non-sensitive arguments, `ok` and the summary (this
-feeds the Muse activity panel in the web app). Services called by the tools write their own entries too (for example
+feeds the Muse activity panel in the web app). Calls the MCP SDK refuses before the tool runs (a write tool called with a
+read token or any other unknown or disabled tool name, or arguments that fail the input schema) are audited too, as
+`muse.<tool>` with `ok: false`, empty `args` and the error text as the summary; a name that is not an Inroad tool is
+filed as `muse.unknown_tool` with the name (any characters, spaces and newlines included, cut to 64) in `args.tool`.
+The audit wraps the SDK's `tools/call` handler, found by its method name; if it is ever not attached, the server logs
+an error on every request. Services called by the tools write their own entries too (for example
 `application.prepared` with the rule-check result, ground rule 6).
 
 MCP annotations: `openWorldHint: false` on every tool; Read tools set `readOnlyHint: true, idempotentHint: true`.
@@ -71,15 +78,15 @@ its side effects.
 | Tool | Muse class | Input | Output | Side effects | Annotations |
 | --- | --- | --- | --- | --- | --- |
 | `find_roles` | Read | `{ type?: "intern"\|"newgrad", company?: string, newOnly?: boolean }` | `{ roles: [{ jobId, title, company, location, type, url, postedAt, firstSeenAt, matchScore, status, reason, applicationId, warmPath, warmPathContacts }], count }` (≤ 50, best match first) | none | read-only, idempotent |
-| `find_warm_path` | Read | `{ company: string }` | `{ company, contacts: [{ contactId, name, role, relationship, source }] }` warmest first | none | read-only, idempotent |
-| `get_campaign` | Read | `{}` | `{ status: "active"\|"paused"\|"none", inForce, pending, defaultResume: { resumeId, filename } \| null }`; each version is `{ versionId, createdAt, approvedAt, approvedVia, rules, summary: string[] }` | none | read-only, idempotent |
+| `find_warm_path` | Read | `{ company: string }` | `{ company, contacts: [{ contactId, name, role, relationship, source }] }` warmest first. `company` is the matched company's name, or `null` when the user has no saved contacts there (the summary then repeats the name as typed). | none | read-only, idempotent |
+| `get_campaign` | Read | `{}` | `{ status: "active"\|"paused"\|"ended"\|"revoked"\|"none", inForce, pending, defaultResume: { resumeId, filename } \| null }`; each version is `{ versionId, createdAt, approvedAt, approvedVia, rules, summary: string[] }` | none | read-only, idempotent |
 | `draft_outreach` | Write | `{ contactId, jobId?, kind: "coffee_chat"\|"referral_ask" }` | `{ outreachId, kind, status: "draft", draft, packet, note }` | saves an Outreach draft. **Inroad never sends messages; the user sends them.** | idempotent: no |
-| `propose_campaign` | Write | `{ rules: { roles, autoCompanies, askFirstCompanies, resumeId, weeklyCap 1-20, minMatch 50-100, endsOn "YYYY-MM-DD" } }` | `{ versionId, approved, changed, summary: string[], inForceVersionId, replacedVersionId, message }` | saves a NEW pending, unapproved version; the earlier pending version (`replacedVersionId`) is superseded and can no longer be approved. Rules identical to the pending version return it unchanged (`changed: false`); identical to the rules in force with nothing pending change nothing (`changed: false, approved: true`, the in-force `versionId`). `summary` is of the stored rules of `versionId`. Nothing changes until approved. | idempotent |
+| `propose_campaign` | Write | `{ rules: { roles, autoCompanies, askFirstCompanies, resumeId, weeklyCap 1-20, minMatch 50-100, endsOn "YYYY-MM-DD" } }` | `{ versionId, outcome: "created"\|"unchanged_pending"\|"unchanged_in_force"\|"withdrawn_pending", approved, changed, summary: string[], inForceVersionId, replacedVersionId, message }` | saves a NEW pending, unapproved version (`outcome: "created"`); the earlier pending version (`replacedVersionId`) is superseded and can no longer be approved. Rules identical to the pending version return it unchanged (`unchanged_pending`, `changed: false`); identical to the rules in force with nothing pending change nothing (`unchanged_in_force`, `changed: false, approved: true`, the in-force `versionId`). Rules identical to the rules in force while another version is pending withdraw that pending version (`withdrawn_pending`, `replacedVersionId` is the withdrawn version, `versionId` is the version in force); the withdrawn version can no longer be approved and there is nothing new to approve. `summary` is of the stored rules of `versionId`. Nothing changes until approved. | idempotent |
 | `approve_campaign` | **Sensitive write** | `{ versionId }` | `{ versionId, approvedAt, approvedVia: "muse", campaignStatus, summary }` | approves the version (`approvedVia: 'muse'`); it becomes the rules in force, and a first approval activates the campaign. Only the current pending version can be approved: a superseded `versionId` is an error ("These rules changed after you reviewed them. Review the latest summary and approve again." plus the next step: call `get_campaign`/`propose_campaign`, show the new summary, ask again) and approves nothing | destructive |
 | `prepare_application` | Write | `{ jobId }` | `{ applicationId, jobId, status, decidedBy, ok, reason, topChoice, packet \| null }` | creates the Application (`prepared` if the rule check passes, otherwise `waiting` with the reason) and its audit entry; a top-choice company also gets a referral-ask draft. Again for a waiting row: re-checked (a pass prepares it with the campaign's resume; a different failing reason updates the reason, audits and, for a top choice, drafts the referral ask; a Skip/Approve the user made meanwhile is kept). A closed posting is an error ("This posting has closed."). | idempotent |
 | `submit_application` | **Sensitive write** | `{ applicationId }` | `{ applicationId, applyUrl, packet, nextStep }` | writes the audit entry (`application.packet_requested`) and, when it returns the packet, stamps `Application.packetReleasedAt` (the packet is released, so `record_submission` can record it later even after a pause or rules edit). Inroad submits nothing. | destructive, idempotent |
 | `record_submission` | Write | `{ applicationId, confirmationText?: string ≤ 2000 }` | `{ applicationId, status: "submitted", submittedAt }` | marks it `submitted` and writes `application.submitted`, only if `submit_application` released its packet (stays recordable after a later pause or rules edit) or it may go out right now; otherwise an error with the reason, nothing recorded, and `application.record_refused` audited | idempotent |
-| `run_weekly_pass` | Write | `{}` | `{ submitted: string[], waiting: string[], referralDrafts: string[], failed: string[], reason: string \| null }` ("Company · Title") | runs `prepare_application` for every new match the approved campaign covers | idempotent: no |
+| `run_weekly_pass` | Write | `{}` | `{ submitted: string[], waiting: string[], referralDrafts: string[], failed: string[], reason: string \| null }` ("Company · Title") | runs `prepare_application` for every new match the approved campaign covers. `failed` lists matches that hit an error and were not processed (the summary says how many). `reason` is set when the campaign can't run (no approved rules, paused or ended) or when the pass stops because no resume is uploaded; if some matches were already handled the summary says the pass stopped early. | idempotent: no |
 
 ### Permissions and approval flow
 
@@ -104,25 +111,40 @@ its side effects.
 - `find_roles.status`: from the user's existing application when there is one (`prepared`, `waiting`, `submitted`,
   `skipped`, with its stored reason); otherwise from the rule check: `will_auto_apply`, `referral_first` (top-choice
   company) or `held` (the reason says why, e.g. `Match below 75%`, `Weekly limit reached`, `No approved campaign yet`).
+  A prepared application that may not go out right now (for example the campaign was paused after it was prepared)
+  also shows as `held`, with its `applicationId` and a `Held: ...` reason.
+- `prepare_application` on an application the user skipped returns it unchanged (`status: "skipped"`, `ok: false`, no
+  packet) with the summary "The user skipped this application; nothing will be prepared."
 - Application lifecycle: `prepared` (cleared to submit) → `submitted`; `waiting` → the user approves (`prepared`) or skips
   (`skipped`) in the web app. `run_weekly_pass.submitted` lists applications cleared to submit (`prepared`), not sent.
 - Campaign: a proposal is pending until approved; the newest approved version stays in force meanwhile.
+  `get_campaign.status` is `active`, `paused`, `ended`, `revoked` or `none` (no campaign yet). It is `ended` once the
+  end date of the rules in force has passed, even if the campaign was never paused; nothing more is prepared until the
+  user approves rules with a new end date.
 
 ### Errors
 
 | Situation | What Muse gets |
 | --- | --- |
-| Bad arguments (unknown key such as `userId`, wrong type, out of range) | tool result `isError: true`, text `Input validation error: ...` |
+| Bad arguments (unknown key such as `userId`, wrong type, out of range) | tool result `isError: true`, text `MCP error -32602: Input validation error: ...` (audited, see Tools) |
 | Business refusal (rule check fails, not found, wrong state, already approved, invalid rules) | tool result `isError: true` with a user-safe sentence, e.g. `Inroad won't release this application: Weekly limit reached`, `We couldn't find that application.` |
 | Someone else's id | the same "couldn't find" message as a missing id (no data about other users) |
 | Unexpected failure | `isError: true`, `Something went wrong in Inroad. Try again in a moment.` (details logged server side only) |
-| Write tool with a read token | `isError: true`, `Tool <name> not found` |
-| HTTP level | `401` (token), `403` (Origin), `405` (GET/DELETE), `413` (> 1 MB), `429` (rate limit), `500`; JSON-RPC error bodies |
+| Write tool with a read token | `isError: true`, `MCP error -32602: Tool <name> not found` (audited, see Tools) |
+| HTTP level | `400` (invalid JSON or JSON-RPC, unsupported `MCP-Protocol-Version`), `401` (token), `403` (Origin), `405` (GET/DELETE), `406` (`Accept` missing `application/json` or `text/event-stream`), `413` (> 1 MB), `415` (`Content-Type` not `application/json`), `429` (rate limit), `500`; JSON-RPC error bodies |
 
 ### Rate limits
 
 60 requests per minute per token (token bucket, burst 60). Over the limit: `429` with `Retry-After` in seconds.
-The bucket is in memory, so it holds per server instance. TODO(scale): use a shared store for multi-instance deploys.
+
+Requests that carry a well-formed bearer token (`Bearer inr_` plus 43 characters) that fails verification (unknown or
+revoked) share one global bucket of 300 per minute (burst 300). Over it they get `429` with `Retry-After` instead of
+`401`. Requests with no `Authorization` header or a malformed one are never counted and always get the `401`
+challenge, so a client starting authorization is never told to back off; requests with a valid token are never counted
+either. Each counted request still costs one token lookup, so this tells clients to back off rather than blocking
+traffic; volumetric protection belongs at the edge.
+
+The buckets are in memory, so they hold per server instance. TODO(scale): use a shared store for multi-instance deploys.
 
 ## Reviewer test account
 

@@ -90,7 +90,7 @@ describe("find_warm_path", () => {
     expect(contacts[0]).not.toHaveProperty("email");
 
     const stripe = await call(client, "find_warm_path", { company: "Stripe" });
-    expect(stripe).toMatchObject({ isError: false, data: { company: "Stripe", contacts: [] } });
+    expect(stripe).toMatchObject({ isError: false, data: { company: null, contacts: [] }, text: "No saved contacts at Stripe." });
   });
 });
 

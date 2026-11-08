@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { appOrigin, mcpEndpoint, resourceMetadataUrl } from "./config";
-import { originAllowed } from "./handler";
+import { createMcpHandler, originAllowed } from "./handler";
 import { protectedResourceMetadata } from "./metadata";
-import { createRateLimiter } from "./rate-limit";
+import { createRateLimiter, FAILED_AUTH_RATE_LIMIT, MCP_RATE_LIMIT } from "./rate-limit";
 import { methodNotAllowed, tooManyRequests, unauthorized } from "./responses";
 
 describe("appOrigin", () => {
@@ -59,6 +59,69 @@ describe("createRateLimiter", () => {
     limiter.take("c"); // evicts "a", the least recently used
     now = 1;
     expect(limiter.take("a").allowed).toBe(true);
+  });
+});
+
+describe("createRateLimiter default clock", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reads Date.now at call time, so a frozen clock holds even for a limiter created earlier", () => {
+    const limiter = createRateLimiter({ capacity: 1, windowMs: 1000 });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-08T12:00:00Z"));
+    expect(limiter.take("a").allowed).toBe(true);
+    expect(limiter.take("a").allowed).toBe(false);
+    vi.setSystemTime(new Date("2026-11-08T12:00:01Z"));
+    expect(limiter.take("a").allowed).toBe(true);
+  });
+});
+
+describe("createMcpHandler failed-token limit", () => {
+  const goodToken = { tokenId: "t1", userId: "u1", scope: "read" as const };
+  // Well-formed tokens (inr_ + 43 base64url characters); only "good" verifies.
+  const wellFormed = (fill: string) => `Bearer inr_${fill.repeat(43)}`;
+  const GOOD = wellFormed("g");
+  const handlerWith = (capacity: number) =>
+    createMcpHandler({
+      origin: () => "https://a.test",
+      verify: async (header) => (header === GOOD ? goodToken : null),
+      failedAuthLimiter: createRateLimiter({ capacity, windowMs: 60_000, now: () => 0 }),
+    });
+  const request = (authorization?: string) =>
+    new Request("https://a.test/mcp", { method: "GET", headers: authorization ? { Authorization: authorization } : {} });
+
+  it("answers 429 with Retry-After once too many well-formed tokens fail verification, from any client", async () => {
+    const handle = handlerWith(2);
+    expect((await handle(request(wellFormed("a")))).status).toBe(401);
+    expect((await handle(request(wellFormed("b")))).status).toBe(401);
+    const limited = await handle(request(wellFormed("c")));
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+  });
+
+  it("always answers a missing or malformed Authorization header with the 401 challenge, without draining the bucket", async () => {
+    const handle = handlerWith(1);
+    for (const authorization of [undefined, "Bearer bad", "Basic abc", "Bearer inr_short", "Bearer"]) {
+      const response = await handle(request(authorization));
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toContain("resource_metadata=");
+    }
+    expect((await handle(request(wellFormed("a")))).status).toBe(401);
+    expect((await handle(request(wellFormed("b")))).status).toBe(429);
+    expect((await handle(request())).status).toBe(401);
+  });
+
+  it("never limits a request whose token verifies", async () => {
+    const handle = handlerWith(1);
+    await handle(request(wellFormed("a")));
+    expect((await handle(request(wellFormed("a")))).status).toBe(429);
+    expect((await handle(request(GOOD))).status).toBe(405);
+  });
+
+  it("gives failed tokens a larger, shared budget than one token gets", () => {
+    expect(FAILED_AUTH_RATE_LIMIT.capacity).toBeGreaterThan(MCP_RATE_LIMIT.capacity);
   });
 });
 

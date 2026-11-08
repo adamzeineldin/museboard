@@ -9,6 +9,7 @@ import {
   summarizeRules,
   type ProposalResult,
 } from "@/lib/campaign";
+import { isPastEnd } from "@/lib/campaign/ended";
 import { db } from "@/lib/db";
 import { getDefaultResume } from "@/lib/resume";
 import { CampaignRulesSchema, parseCampaignRules, type CampaignRules } from "@/lib/types";
@@ -32,11 +33,21 @@ type VersionView = z.infer<typeof VersionSchema>;
 const NOTHING_CHANGES = "Nothing changes until the user approves this version; the version in force keeps governing.";
 const ALREADY_IN_FORCE = "These rules are already the rules in force. Nothing changed and there is nothing to approve.";
 const ALREADY_PENDING = "These rules are already the pending version, so nothing new was saved.";
+const withdrawnMessage = (versionId: string | null): string =>
+  `These rules are already the rules in force, so the pending version ${versionId ?? ""} was withdrawn and can no longer be approved. There is nothing to approve.`;
+const PROPOSAL_LEAD: Record<ProposalResult["outcome"], string> = {
+  created: "Proposed new campaign rules (pending).",
+  unchanged_pending: "No change to the campaign rules.",
+  unchanged_in_force: "No change to the campaign rules.",
+  withdrawn_pending: "Withdrew the pending campaign rules.",
+};
+const PROPOSAL_OUTCOMES = ["created", "unchanged_pending", "unchanged_in_force", "withdrawn_pending"] as const satisfies readonly ProposalResult["outcome"][];
 const STALE_NEXT_STEP =
   "Call get_campaign (or propose_campaign again) to get the current pending versionId and its summary, show that summary to the user, and ask again before calling approve_campaign.";
 
 function proposalMessage(result: ProposalResult): string {
   if (result.outcome === "unchanged_in_force") return ALREADY_IN_FORCE;
+  if (result.outcome === "withdrawn_pending") return withdrawnMessage(result.supersededVersionId);
   const replaced = result.supersededVersionId
     ? ` It replaces the earlier pending version ${result.supersededVersionId}, which can no longer be approved.`
     : "";
@@ -66,13 +77,25 @@ async function versionView(userId: string, version: CampaignVersion | null): Pro
   };
 }
 
+async function userTimeZone(userId: string): Promise<string> {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { timezone: true } });
+  if (!user) throw new ToolRefusal("We couldn't find your account.");
+  return user.timezone;
+}
+
+function statusSentence(status: z.infer<typeof CampaignStatusOutput>, endsOn: string | null): string {
+  if (status === "none") return "No campaign yet.";
+  if (status === "ended") return `Campaign ended on ${endsOn ?? "its end date"}. Inroad prepares nothing more until the user approves rules with a new end date.`;
+  return `Campaign is ${status}.`;
+}
+
 export const getCampaignTool = defineTool({
   name: "get_campaign",
   title: "Get campaign",
   museClass: "read",
   description: [
     "Muse class: Read. No side effects (Inroad only records that the tool was called).",
-    "Returns the user's campaign: its status (active, paused or none), the rules in force (the newest version the user approved) with a plain-English summary,",
+    "Returns the user's campaign: its status (active, paused, ended or none; ended means an active campaign whose end date has passed, so nothing more is prepared), the rules in force (the newest version the user approved) with a plain-English summary,",
     "and any pending version (edited but not yet approved) with its summary. A pending version changes nothing until the user approves it.",
     "Also returns the user's default resume (its resumeId is what propose_campaign's rules.resumeId expects), or null if none is uploaded.",
   ].join(" "),
@@ -92,9 +115,12 @@ export const getCampaignTool = defineTool({
       getDefaultResume(ctx.userId),
     ]);
     const defaultResume = resume ? { resumeId: resume.id, filename: resume.filename } : null;
-    const status = state.campaign ? CampaignStatusOutput.catch("paused").parse(state.campaign.status) : "none";
+    const stored = state.campaign ? CampaignStatusOutput.catch("paused").parse(state.campaign.status) : "none";
+    const endsOn = state.rulesInForce?.endsOn ?? null;
+    const ended = stored === "active" && endsOn !== null && isPastEnd(endsOn, ctx.now(), await userTimeZone(ctx.userId));
+    const status = ended ? "ended" : stored;
     const parts = [
-      status === "none" ? "No campaign yet." : `Campaign is ${status}.`,
+      statusSentence(status, endsOn),
       inForce ? "Rules in force are approved." : "No approved rules yet.",
       pending ? "A changed version is waiting for the user's approval." : "",
     ];
@@ -108,7 +134,8 @@ export const proposeCampaignTool = defineTool({
   museClass: "write",
   description: [
     "Muse class: Write. Side effect: saves the rules as a new pending, unapproved campaign version. Any earlier pending version is replaced and can no longer be approved.",
-    "Proposing rules identical to the pending version returns that version unchanged; rules identical to the ones in force (with nothing pending) change nothing.",
+    "Proposing rules identical to the pending version returns that version unchanged; rules identical to the ones in force change nothing when nothing is pending,",
+    "and withdraw the pending version when one exists (outcome withdrawn_pending: that version can no longer be approved and there is nothing to approve).",
     NOTHING_CHANGES,
     "Returns the plain-English summary of the proposed rules and its versionId. Show the user that summary; approving it is a separate step (approve_campaign) for that exact versionId.",
     "rules: roles (intern, newgrad), autoCompanies, askFirstCompanies (companies Inroad never applies to without asking; it drafts a referral ask instead),",
@@ -118,9 +145,11 @@ export const proposeCampaignTool = defineTool({
   hints: { destructiveHint: false, idempotentHint: true },
   output: z.object({
     versionId: z.string(),
-    /** true only when nothing changed because these rules are already in force. */
+    /** created, unchanged_pending, unchanged_in_force, or withdrawn_pending (the pending version was withdrawn). */
+    outcome: z.enum(PROPOSAL_OUTCOMES),
+    /** true when versionId is the version in force (the rules are already in force). */
     approved: z.boolean(),
-    /** false when the proposal matched the pending version or the rules in force. */
+    /** false when nothing was saved or withdrawn (the proposal matched the pending version or the rules in force). */
     changed: z.boolean(),
     summary: z.array(z.string()),
     inForceVersionId: z.string().nullable(),
@@ -135,13 +164,13 @@ export const proposeCampaignTool = defineTool({
     if (!stored) throw new ToolRefusal("Those rules could not be saved. Review them and try again.");
     const [state, summary] = await Promise.all([getCampaignState(ctx.userId), summaryFor(ctx.userId, stored)]);
     const message = proposalMessage(result);
-    const lead =
-      result.outcome === "created" ? "Proposed new campaign rules (pending)." : "No change to the campaign rules.";
+    const lead = PROPOSAL_LEAD[result.outcome];
     return {
       data: {
         versionId: result.version.id,
+        outcome: result.outcome,
         approved: result.version.approvedAt !== null,
-        changed: result.outcome === "created",
+        changed: result.outcome === "created" || result.outcome === "withdrawn_pending",
         summary,
         inForceVersionId: state.inForce?.id ?? null,
         replacedVersionId: result.supersededVersionId,

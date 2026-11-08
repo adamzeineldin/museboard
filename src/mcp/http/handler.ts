@@ -1,18 +1,22 @@
 import "server-only";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { verifyBearer, type VerifiedToken } from "@/lib/connector";
+import { parseBearerHeader } from "@/lib/connector/token-format";
 import { createInroadMcpServer } from "../server";
 import { appOrigin } from "./config";
-import { createRateLimiter, MCP_RATE_LIMIT, type RateLimiter } from "./rate-limit";
+import { createRateLimiter, FAILED_AUTH_KEY, FAILED_AUTH_RATE_LIMIT, MCP_RATE_LIMIT, type RateLimiter } from "./rate-limit";
 import { forbiddenOrigin, internalError, methodNotAllowed, payloadTooLarge, tooManyRequests, unauthorized } from "./responses";
 
-// /mcp request pipeline: Origin check (DNS-rebinding protection) -> bearer token -> per-token rate limit
-// -> stateless streamable HTTP (a fresh server + transport per request, JSON responses, no sessions).
+// /mcp request pipeline: Origin check (DNS-rebinding protection) -> bearer token (a well-formed token that fails
+// verification counts against one global rate limit) -> per-token rate limit -> stateless streamable HTTP (a fresh server + transport per request,
+// JSON responses, no sessions).
 
 export const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface McpHandlerDeps {
   limiter?: RateLimiter;
+  /** Global bucket for well-formed tokens that fail verification; over it they get 429 instead of 401. */
+  failedAuthLimiter?: RateLimiter;
   verify?: (header: string | null) => Promise<VerifiedToken | null>;
   origin?: () => string;
 }
@@ -52,6 +56,7 @@ async function serve(request: Request, token: VerifiedToken): Promise<Response> 
 
 export function createMcpHandler(deps: McpHandlerDeps = {}): (request: Request) => Promise<Response> {
   const limiter = deps.limiter ?? createRateLimiter(MCP_RATE_LIMIT);
+  const failedAuthLimiter = deps.failedAuthLimiter ?? createRateLimiter(FAILED_AUTH_RATE_LIMIT);
   const verify = deps.verify ?? ((header: string | null) => verifyBearer(header));
   const originOf = deps.origin ?? (() => appOrigin());
 
@@ -62,7 +67,12 @@ export function createMcpHandler(deps: McpHandlerDeps = {}): (request: Request) 
 
       const authorization = request.headers.get("authorization");
       const token = await verify(authorization);
-      if (!token) return unauthorized(origin, authorization !== null);
+      if (!token) {
+        // A missing or malformed header is a client that has not authorized yet: always send the 401 challenge.
+        if (parseBearerHeader(authorization) === null) return unauthorized(origin, authorization !== null);
+        const failed = failedAuthLimiter.take(FAILED_AUTH_KEY);
+        return failed.allowed ? unauthorized(origin, true) : tooManyRequests(failed.retryAfterSeconds);
+      }
 
       const decision = limiter.take(token.tokenId);
       if (!decision.allowed) return tooManyRequests(decision.retryAfterSeconds);

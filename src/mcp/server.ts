@@ -1,6 +1,7 @@
 import "server-only";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toolContext, type InroadServerOptions } from "./context";
+import { auditSdkRefusals } from "./refusal-audit";
 import type { InroadTool } from "./tool-kit";
 import { approveCampaignTool, getCampaignTool, proposeCampaignTool } from "./tools/campaign";
 import { findRolesTool, findWarmPathTool } from "./tools/discovery";
@@ -26,6 +27,8 @@ export const INROAD_TOOLS: readonly InroadTool[] = [
   runWeeklyPassTool,
 ];
 
+const TOOL_NAMES: ReadonlySet<string> = new Set(INROAD_TOOLS.map((tool) => tool.name));
+
 const INSTRUCTIONS = [
   "Inroad is a job-search copilot for students looking for SWE internships and new-grad roles.",
   "Each tool description states its Muse class (Read, Write or Sensitive write) and its side effects.",
@@ -40,6 +43,8 @@ export function toolsForScope(scope: InroadServerOptions["scope"]): readonly Inr
 export function createInroadMcpServer(options: InroadServerOptions): McpServer {
   const ctx = toolContext(options);
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS });
+  const refusalAudit = auditSdkRefusals(server, ctx, TOOL_NAMES);
   for (const tool of toolsForScope(ctx.scope)) tool.register(server, ctx);
+  refusalAudit.assertInstalled();
   return server;
 }
