@@ -1,6 +1,6 @@
 import unittest
 
-from scraper.classify import classify, might_be_early_career
+from scraper.classify import classify, is_software_role, might_be_early_career
 
 
 class ClassifyTitleTest(unittest.TestCase):
@@ -40,6 +40,7 @@ class ClassifyTitleTest(unittest.TestCase):
         "University Recruiter",
         "Campus Recruiting Partner",
         "Business Development Program Manager",
+        "High School Internship, Software Engineering (Summer 2027)",
         "",
     ]
 
@@ -122,6 +123,65 @@ class MightBeEarlyCareerTest(unittest.TestCase):
         ):
             with self.subTest(title=title):
                 self.assertFalse(might_be_early_career(title))
+
+
+class SoftwareRoleTest(unittest.TestCase):
+    """Inroad is for SWE internships and new-grad roles: early-career but non-engineering roles are dropped."""
+
+    SOFTWARE = [
+        "Software Engineering Intern, Backend",
+        "Software Engineer, New Grad",
+        "Forward Deployed Software Engineer, Internship - US Government",
+        "Year at Palantir - Forward Deployed Software Engineer, Internship - Commercial",
+        "Master's Machine Learning Engineer, Intern",
+        "Applied Scientist Intern",
+        "Research Science Intern (PhD)",
+        "Current PhD, AI Engineering Internship Program - Summer 2027",
+        "Technology Development Program - Software Engineer",
+        "New Graduate Engineer",
+        "Software Engineering Intern, iOS",
+        "Full-Stack Developer Co-op",
+        "Security Operations Engineer, New Grad",
+        "Data Engineer, Early Career",
+        "Site Reliability Engineer Intern",
+    ]
+    NOT_SOFTWARE = [
+        "Sales Development Representative - Summer 2027 Graduates (Boston)",
+        "Deployment Strategist, Internship",
+        "Intern, Strategy Analyst - Summer 2027",
+        "Product Designer, Internship",
+        "Product Design Intern",
+        "Product Manager: New Grad Accelerator",
+        "Operations Associate, Apprenticeship",
+        "Controllership Intern",
+        "University Grad | Customer Experience Associate",
+        "Junior Commercial Associate, Works in Progress",
+        "Data Analyst, Intern",
+        "Sales Engineer, New Grad",
+        "Recruiting Coordinator Intern",
+        "Marketing Intern",
+        "",
+    ]
+
+    def test_software_roles(self):
+        for title in self.SOFTWARE:
+            with self.subTest(title=title):
+                self.assertTrue(is_software_role(title))
+
+    def test_other_roles(self):
+        for title in self.NOT_SOFTWARE:
+            with self.subTest(title=title):
+                self.assertFalse(is_software_role(title))
+
+    def test_engineering_department_rescues_a_neutral_title(self):
+        self.assertTrue(is_software_role("Summer Intern 2027", "Engineering"))
+        self.assertTrue(is_software_role("PhD Research Intern", "Research & Development"))
+        self.assertFalse(is_software_role("Summer Intern 2027", "Finance"))
+        self.assertFalse(is_software_role("Summer Intern 2027", None))
+
+    def test_department_does_not_rescue_a_non_engineering_title(self):
+        self.assertFalse(is_software_role("Sales Development Representative Intern", "Engineering"))
+        self.assertFalse(is_software_role("Product Designer, Internship", "Engineering"))
 
 
 if __name__ == "__main__":

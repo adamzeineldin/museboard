@@ -30,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--company", help="only scrape this company (case-insensitive name)")
     parser.add_argument(
         "--include-all", action="store_true",
-        help="also emit roles that are neither intern nor new grad (type null)",
+        help="also emit roles that are neither intern nor new grad (type null) and non-software roles",
     )
     parser.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS, help="companies scraped in parallel")
     parser.add_argument("-v", "--verbose", action="store_true", help="log progress to stderr")

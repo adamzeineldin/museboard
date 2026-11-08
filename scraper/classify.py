@@ -4,7 +4,7 @@
 is neither (or is clearly senior) and should be dropped by the caller.
 
 Order of evidence, strongest first:
-1. Strong seniority in the title (Senior, Staff, Principal, Director, ...) -> None.
+1. Strong seniority in the title (Senior, Staff, Principal, Director, ...) or a high-school program -> None.
 2. Recruiting / program-staff roles about interns ("Intern Program Manager") -> None.
 3. Title keywords: intern/internship/co-op -> intern; new grad/early career/... -> newgrad.
 4. Weak seniority (Manager, Lead, Architect) without a title keyword -> None.
@@ -30,6 +30,8 @@ _PROGRAM_STAFF = re.compile(
     rf"\b{_KEYWORD}\s+(program(s)?\s+(manager|coordinator|lead|specialist|partner|director)|recruit\w*|hiring)\b",
     _FLAGS,
 )
+# Inroad is for college students: high-school programs are out of scope even when they are "internships".
+_HIGH_SCHOOL = re.compile(r"\bhigh[ -]school\b", _FLAGS)
 _INTERN_TITLE = re.compile(
     r"\b(interns?|internships?|co-?ops?|apprentices?|apprenticeships?|werkstudent)\b"
     r"|\bsummer\s+(analyst|associate|engineer|intern)\b",
@@ -101,7 +103,7 @@ def classify(
 ) -> JobType | None:
     """Return ``"intern"``, ``"newgrad"`` or ``None`` (neither / too senior)."""
     title = (title or "").strip()
-    if not title or _STRONG_SENIORITY.search(title) or _PROGRAM_STAFF.search(title):
+    if not title or _STRONG_SENIORITY.search(title) or _PROGRAM_STAFF.search(title) or _HIGH_SCHOOL.search(title):
         return None
     from_title = _from_title(title)
     if from_title is not None:
@@ -111,6 +113,44 @@ def classify(
     if employment_type and _INTERN_EMPLOYMENT.search(employment_type):
         return "intern"
     return _from_description(description or "")
+
+
+# Inroad is for SWE internships and new-grad roles (brief, first line). These decide the discipline from the
+# title, with the posting's department as a tie-breaker for neutral titles such as "Summer Intern 2027".
+_SOFTWARE_STRONG = re.compile(
+    r"\b(software|developers?|programmers?|swe|sde|full[ -]?stack|back[ -]?end|front[ -]?end|ios|android"
+    r"|firmware|embedded|machine learning|site reliability|sre|devops)\b",
+    _FLAGS,
+)
+_SOFTWARE_EXCLUDED = re.compile(
+    r"\b(sales|marketing|recruit\w*|designers?|design|product manag\w*|program manag\w*|project manag\w*"
+    r"|strateg\w*|analysts?|account\w*|controller\w*|finance|financial|legal|counsel|customer|support"
+    r"|commercial|business|people|human resources|communications|policy|writer|editor|tax|audit"
+    r"|procurement|representatives?|coordinators?)\b",
+    _FLAGS,
+)
+_SOFTWARE_WEAK = re.compile(
+    r"\b(engineer\w*|scien\w*|research\w*|ml|ai|security|infrastructure|technology)\b", _FLAGS
+)
+_ENGINEERING_DEPARTMENT = re.compile(
+    r"\b(engineering|software|technology|research|r&d|data|machine learning|ai|security|infrastructure"
+    r"|platform|development)\b",
+    _FLAGS,
+)
+
+
+def is_software_role(title: str | None, department: str | None = None) -> bool:
+    """True for software / ML / research engineering roles; False for sales, design, product, ops and the like."""
+    title = (title or "").strip()
+    if not title:
+        return False
+    if _SOFTWARE_STRONG.search(title):
+        return True
+    if _SOFTWARE_EXCLUDED.search(title):
+        return False
+    if _SOFTWARE_WEAK.search(title):
+        return True
+    return bool(department and _ENGINEERING_DEPARTMENT.search(department))
 
 
 def might_be_early_career(title: str | None) -> bool:

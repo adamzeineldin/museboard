@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from .ats import FETCHERS, Fetcher
+from .classify import is_software_role
 from .config import CompanyConfig
 from .dates import format_utc, utc_now_iso
 from .models import CompanyResult, Job
@@ -33,6 +34,13 @@ def _dedupe(jobs: Sequence[Job]) -> tuple[Job, ...]:
     return tuple(unique)
 
 
+def _in_scope(jobs: Sequence[Job], include_all: bool) -> tuple[Job, ...]:
+    """Inroad covers software roles only; the adapters already kept just intern / new-grad postings."""
+    if include_all:
+        return tuple(jobs)
+    return tuple(job for job in jobs if is_software_role(job.title, job.department))
+
+
 def scrape_company(
     company: CompanyConfig,
     client: Any,
@@ -47,7 +55,7 @@ def scrape_company(
     except Exception as exc:  # isolate every failure to its company
         log.error("%s (%s) failed: %s", company.name, company.ats, _error_message(exc))
         return CompanyResult.failure(company.name, company.ats, _error_message(exc))
-    unique = _dedupe(jobs)
+    unique = _dedupe(_in_scope(jobs, include_all))
     log.info("%s (%s): %d jobs", company.name, company.ats, len(unique))
     return CompanyResult(company=company.name, ats=company.ats, ok=True, error=None, jobs=unique)
 

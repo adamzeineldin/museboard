@@ -1,5 +1,6 @@
 import re
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from scraper.config import parse_companies
@@ -88,6 +89,21 @@ class RunScrapeTest(unittest.TestCase):
         result = run_scrape(COMPANIES[:1], client=object(), fetchers={"greenhouse": dupes})
         self.assertEqual([j["id"] for j in result["companies"][0]["jobs"]],
                          ["greenhouse:stripe:7", "greenhouse:stripe:8"])
+
+    def test_non_software_roles_are_dropped(self):
+        def mixed(company, client, include_all=False):
+            return [
+                job_for(company, "1"),
+                replace(job_for(company, "2"), title="Sales Development Representative - 2027 Graduates"),
+                replace(job_for(company, "3"), title="Summer Intern 2027", department="Engineering"),
+            ]
+
+        result = run_scrape(COMPANIES[:1], client=object(), fetchers={"greenhouse": mixed})
+        self.assertEqual([j["id"] for j in result["companies"][0]["jobs"]],
+                         ["greenhouse:stripe:1", "greenhouse:stripe:3"])
+
+        everything = run_scrape(COMPANIES[:1], client=object(), fetchers={"greenhouse": mixed}, include_all=True)
+        self.assertEqual(len(everything["companies"][0]["jobs"]), 3)
 
     def test_include_all_is_forwarded(self):
         seen = []
