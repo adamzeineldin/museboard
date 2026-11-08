@@ -21,7 +21,7 @@ export default defineConfig({
     },
     coverage: {
       provider: "v8",
-      include: ["src/lib/**/*.ts", "src/components/**/*.ts", "src/app/**/*.ts", "src/mcp/**/*.ts", "worker/**/*.ts"],
+      include: ["src/lib/**/*.ts", "src/components/**/*.ts", "src/app/**/*.ts", "src/mcp/**/*.ts", "src/proxy.ts", "worker/**/*.ts"],
       exclude: ["**/*.test.ts", "src/generated/**", "src/test/**", "**/testing/**", "**/__fixtures__/**"],
       // The consent paths (campaign approval, applications, the Muse connector) must stay well tested.
       thresholds: {

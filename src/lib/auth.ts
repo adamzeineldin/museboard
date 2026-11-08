@@ -4,6 +4,7 @@ import Nodemailer from "next-auth/providers/nodemailer";
 import { writeAudit } from "./audit";
 import { createAuthAdapter } from "./auth-adapter";
 import { deliverMagicLink } from "./auth-mail";
+import { sendMagicLinkWithinLimit } from "./auth-rate-limit";
 import { db } from "./db";
 
 // Auth.js v5: email magic link (Nodemailer provider) + Prisma adapter + database sessions.
@@ -28,12 +29,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       server: process.env.EMAIL_SERVER || UNUSED_SMTP_PLACEHOLDER,
       from: process.env.EMAIL_FROM || DEFAULT_FROM,
       async sendVerificationRequest({ identifier, url, provider }) {
-        await deliverMagicLink({
-          identifier,
-          url,
-          from: provider.from ?? DEFAULT_FROM,
-          emailServer: process.env.EMAIL_SERVER || undefined,
-        });
+        await sendMagicLinkWithinLimit(identifier, () =>
+          deliverMagicLink({
+            identifier,
+            url,
+            from: provider.from ?? DEFAULT_FROM,
+            emailServer: process.env.EMAIL_SERVER || undefined,
+          }),
+        );
       },
     }),
   ],
