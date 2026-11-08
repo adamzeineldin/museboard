@@ -1,0 +1,295 @@
+// Inroad data model. Brief sec. 3 plus the additions in docs/ARCHITECTURE.md.
+// Enum-like fields are plain Strings; allowed values are validated in TS (src/lib/types.ts)
+// so the schema stays portable between SQLite (local) and Postgres.
+// The connection URL lives in prisma.config.ts (Prisma 7).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ---------------------------------------------------------------------------
+// Users and Auth.js (database sessions, email magic link)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  school        String?
+  gradYear      Int?
+  timezone      String    @default("UTC")
+  digestOptOut  Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  resumes         Resume[]
+  matches         Match[]
+  campaigns       Campaign[]
+  applications    Application[]
+  contacts        Contact[]
+  outreach        Outreach[]
+  auditEvents     AuditEvent[]
+  connectorTokens ConnectorToken[]
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// Muse connector credentials. Only a hash of the token is stored.
+model ConnectorToken {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  tokenHash  String    @unique
+  scope      String // 'read' | 'write'
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Resumes, companies, jobs, matches
+// ---------------------------------------------------------------------------
+
+model Resume {
+  id         String   @id @default(cuid())
+  userId     String
+  filename   String
+  storageKey String
+  parsedText String   @default("")
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([userId])
+}
+
+model Company {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  ats       String? // 'greenhouse' | 'lever' | 'ashby' | 'workday' | null (no public feed, never scraped)
+  atsConfig Json?
+
+  jobs     Job[]
+  contacts Contact[]
+  outreach Outreach[]
+}
+
+model Job {
+  id           String    @id // stable "<ats>:<company>:<postingId>"
+  companyId    String
+  title        String
+  location     String
+  type         String // 'intern' | 'newgrad'
+  postedAt     DateTime?
+  url          String
+  source       String
+  description  String?
+  compensation String?
+  department   String?
+  firstSeenAt  DateTime  @default(now())
+  closedAt     DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  matches      Match[]
+  applications Application[]
+  outreach     Outreach[]
+
+  @@index([companyId])
+  @@index([type, closedAt])
+  @@index([firstSeenAt])
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  userId    String
+  jobId     String
+  score     Int // 0-100
+  reasons   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId, score])
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns and applications
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id        String   @id @default(cuid())
+  userId    String
+  status    String   @default("active") // 'active' | 'paused' | 'revoked' | 'ended'
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions CampaignVersion[]
+
+  @@index([userId, status])
+}
+
+// The newest version with approvedAt set is the one in force.
+model CampaignVersion {
+  id          String    @id @default(cuid())
+  campaignId  String
+  rules       Json
+  approvedAt  DateTime?
+  approvedVia String? // 'web' | 'muse'
+  approvedBy  String? // userId
+  createdAt   DateTime  @default(now())
+
+  campaign     Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([campaignId, createdAt])
+}
+
+model Application {
+  id                String    @id @default(cuid())
+  userId            String
+  jobId             String
+  campaignVersionId String?
+  resumeId          String
+  status            String // 'prepared' | 'waiting' | 'submitted' | 'skipped'
+  decidedBy         String // 'campaign' | 'user'
+  reason            String
+  packet            Json?
+  checkResult       Json?
+  confirmationText  String?
+  decidedAt         DateTime?
+  submittedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job             Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  campaignVersion CampaignVersion? @relation(fields: [campaignVersionId], references: [id], onDelete: SetNull)
+  resume          Resume           @relation(fields: [resumeId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+  @@index([userId, submittedAt])
+  @@index([userId, decidedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Warm paths
+// ---------------------------------------------------------------------------
+
+model Contact {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  role         String
+  companyId    String
+  relationship String
+  source       String // 'manual' | 'csv' | 'alumni-list'
+  email        String?
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company  Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  outreach Outreach[]
+
+  @@index([userId, companyId])
+}
+
+// Inroad only drafts outreach. The user sends it from their own account.
+model Outreach {
+  id        String    @id @default(cuid())
+  userId    String
+  contactId String
+  jobId     String?
+  companyId String
+  kind      String // 'coffee_chat' | 'referral_ask'
+  draft     String
+  status    String    @default("draft") // 'draft' | 'sent_by_user'
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  job     Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([contactId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (ground rule 6: everything is logged)
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  actor     String // 'user' | 'inroad' | 'muse'
+  action    String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, actor, createdAt])
+}
