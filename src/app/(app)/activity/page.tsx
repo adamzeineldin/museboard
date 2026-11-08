@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { EmptyState } from "@/components/ui";
+import { ActivityView } from "@/components/activity/ActivityView";
+import { toRowModels } from "@/components/activity/rows";
+import { getActivity } from "@/lib/applications";
+import { requireUser } from "@/lib/current-user";
 
 export const metadata: Metadata = { title: "Activity" };
 
-// Placeholder from milestone 1. Milestone 5 replaces this page.
-export default function ActivityPage() {
+export default async function ActivityPage() {
+  const user = await requireUser();
+  const data = await getActivity(user.id, user.timezone);
   return (
     <>
       <div className="head">
@@ -13,7 +17,7 @@ export default function ActivityPage() {
           <p className="muted">Every application Inroad prepared, and why it went out or came back to you.</p>
         </div>
       </div>
-      <EmptyState title="Coming soon">This page arrives in milestone 5.</EmptyState>
+      <ActivityView rows={toRowModels(data.items, user.timezone)} stats={data.stats} campaignActive={data.campaignActive} />
     </>
   );
 }

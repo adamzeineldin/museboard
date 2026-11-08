@@ -1,8 +1,9 @@
 import "server-only";
 import { weekCount } from "@/lib/applications";
 import { listRecentAudit } from "@/lib/audit";
+import { getCampaignState } from "@/lib/campaign";
 import { db } from "@/lib/db";
-import { campaignStatusSchema, parseCampaignRules } from "@/lib/types";
+import { campaignStatusSchema } from "@/lib/types";
 import type { CampaignCardInput } from "./campaign-card-model";
 import { museEventModel, type MuseEventModel } from "./muse-event-model";
 
@@ -19,30 +20,19 @@ async function safeWeekCount(userId: string, now: Date, timeZone: string): Promi
   try {
     return await weekCount(userId, now, timeZone);
   } catch (error) {
-    // Until milestone 5 implements weekCount this is a stub; show "–" rather than breaking the shell.
+    // The shell renders on every page, so a failed count shows "–" rather than breaking navigation.
     console.error("[shell] weekCount failed", { userId, error: error instanceof Error ? error.message : error });
     return null;
   }
 }
 
-/**
- * The approved rules of the user's live (active or paused) campaign, or null.
- * TODO(milestone 5): switch to getCampaignState() from @/lib/campaign once it is implemented.
- */
+/** The approved rules of the user's live (active or paused) campaign, or null. */
 async function campaignInForce(userId: string) {
-  const campaign = await db.campaign.findFirst({
-    where: { userId, status: { in: ["active", "paused"] } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!campaign) return null;
-  const version = await db.campaignVersion.findFirst({
-    where: { campaignId: campaign.id, approvedAt: { not: null } },
-    orderBy: { createdAt: "desc" },
-  });
-  const rules = version ? parseCampaignRules(version.rules) : null;
+  const { campaign, rulesInForce } = await getCampaignState(userId);
+  if (!campaign || !rulesInForce) return null;
   const status = campaignStatusSchema.safeParse(campaign.status);
-  if (!rules || !status.success) return null;
-  return { status: status.data, rules };
+  if (!status.success) return null;
+  return { status: status.data, rules: rulesInForce };
 }
 
 /** Everything the signed-in shell (rail badge, campaign card, Muse panel) needs for one user. */
