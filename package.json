@@ -14,7 +14,8 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push && prisma generate",
     "db:seed": "prisma db seed",
-    "worker": "echo \"worker arrives in milestone 2\"",
+    "worker": "tsx --conditions=react-server worker/index.ts",
+    "scrape:once": "tsx --conditions=react-server worker/index.ts --once",
     "e2e": "playwright test",
     "postinstall": "prisma generate"
   },

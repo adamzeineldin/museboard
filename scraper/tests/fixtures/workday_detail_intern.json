@@ -1,0 +1,37 @@
+{
+  "jobPostingInfo": {
+    "id": "d7bb2580fe201001c10dfda688ab0001",
+    "title": "Intern, Strategy Analyst - Summer 2027",
+    "jobDescription": "161 Bay Street (93021), Canada, Toronto,Toronto, Ontario,<p style=\"text-align:inherit\"></p><p style=\"text-align:inherit\"></p>Intern, Strategy Analyst - Summer 2027<p style=\"text-align:inherit\"></p><p style=\"text-align:inherit\"></p><p><b><span>MUST INCLUDE YOUR RESUME AND UNOFFICIAL TRANSCRIPT IN ONE PDF DOCUMENT IN THE ATTACHMENT SECTION WHEN YOU CREATE YOUR PROFILE TO APPLY.</span></b><br /> </p><p><b><span>About Capital One Canada</span></b><br /> </p><p><span>For 30 years, we’ve been on a mission to change banking for good. We challenge the traditional bank stereotype, fostering a culture where innovation thrives and bold ideas are celebrated.</span></p><p></p><p><span>You’ll be empowered to grow your career in a supportive environment where you can own and shape your journey on your own terms. You’ll redefine what’s possible by contributing to work that impacts millions of Canadians, taking ownership of your decisions and outcomes, supported by mentors who will push you to think bigger and challenge the status quo. </span></p><p></p><p><span>Are you ready to redefine what’s next?</span></p><p></p><p><b><span>About the Role</span></b></p><p></p><p><span>You will join our Toronto office for ~16 weeks in the Summer of 2027 (May to August), to work in teams and directly with our internal stakeholders. You will get to work with a team of fellow strategy analysts, along with associates in other job families such as Data Scientists and Product Managers, to identify solutions for problems or processes.</span></p><p></p><p><span>Over the course of each project, you will gather and analyze information, formulate and test hypotheses, and develop and communicate recommendations to business stakeholders. </span></p><p><br /><b><span>Your Responsibilities:</span></b></p><p><br /><span>To give you an idea of what to expect as a Strategy Analyst intern, here are a few project examples:</span></p><ul><li><p><span>Analyzing trends in fraudulent credit card applications and transactions in order to enhance our suite of models and tools. The goal: reduce fraud costs and minimize negative experiences for our cardholders.</span></p></li><li><p><span>Developing a framework through which customers may benefit from having a different card than the one they currently have. The goal: enhancing the overall value provided to the customer while being mindful of the additional costs and credit risk associated with different products.</span></p></li><li><p><span>Building a challenger model to an existing model that predicts how much customers are likely to spend on their credit cards. The goal: understanding if a simpler model could capture enough of the business value to justify retiring the complex model.</span></p></li></ul><p></p><p><span>Be ready to join a community of the smartest people you’ve ever met, who see the customer first, and want to use their data skills to change banking for good.</span></p><p></p><p><b><span>Basic Qualifications:</span></b></p><ul><li><p>",
+    "location": "Toronto, ON",
+    "postedOn": "Posted 2 Days Ago",
+    "startDate": "2026-11-05",
+    "timeType": "Full time",
+    "jobReqId": "R243855",
+    "jobPostingId": "Intern--Strategy-Analyst---Summer-2027_R243855-1",
+    "jobPostingSiteId": "Capital_One",
+    "country": {
+      "descriptor": "Canada",
+      "id": "a30a87ed25634629aa6c3958aa2b91ea"
+    },
+    "canApply": true,
+    "posted": true,
+    "includeResumeParsing": true,
+    "jobRequisitionLocation": {
+      "descriptor": "Toronto, Ontario",
+      "country": {
+        "descriptor": "Canada",
+        "id": "a30a87ed25634629aa6c3958aa2b91ea",
+        "alpha2Code": "CA"
+      }
+    },
+    "externalUrl": "https://capitalone.wd12.myworkdayjobs.com/Capital_One/job/Toronto-ON/Intern--Strategy-Analyst---Summer-2027_R243855-1",
+    "questionnaireId": "bfd0ab5d884810015f8fc246911f0000",
+    "secondaryQuestionnaireId": "bfd0ab5d884810015f901233c8d40000"
+  },
+  "hiringOrganization": {
+    "name": "",
+    "url": ""
+  },
+  "userAuthenticated": false
+}

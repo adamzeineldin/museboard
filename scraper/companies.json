@@ -1,0 +1,18 @@
+{
+  "companies": [
+    { "name": "Stripe", "ats": "greenhouse", "board": "stripe" },
+    { "name": "Datadog", "ats": "greenhouse", "board": "datadog" },
+    { "name": "Cloudflare", "ats": "greenhouse", "board": "cloudflare" },
+    { "name": "Ramp", "ats": "ashby", "board": "ramp" },
+    { "name": "Palantir", "ats": "lever", "site": "palantir" },
+    {
+      "name": "Capital One",
+      "ats": "workday",
+      "tenant": "capitalone",
+      "wd": "wd12",
+      "site": "Capital_One",
+      "max_pages": 200,
+      "max_details": 500
+    }
+  ]
+}

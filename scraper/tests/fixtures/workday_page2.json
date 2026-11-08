@@ -1,0 +1,37 @@
+{
+  "total": 0,
+  "jobPostings": [
+    {
+      "title": "Manager, Data Science - Model Risk Office",
+      "externalPath": "/job/McLean-VA/Manager--Data-Science---Model-Risk-Office_R242995-1",
+      "timeType": "Full time",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "R242995"
+      ]
+    },
+    {
+      "title": "Intern, Strategy Analyst - Summer 2027",
+      "externalPath": "/job/Toronto-ON/Intern--Strategy-Analyst---Summer-2027_R243855-1",
+      "timeType": "Full time",
+      "locationsText": "Toronto, ON",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": [
+        "R243855"
+      ]
+    },
+    {
+      "title": "Associate, Strategy Analyst - New Grad 2027",
+      "externalPath": "/job/Toronto-ON/Associate--Strategy-Analyst---New-Grad-2027_R242577-1",
+      "timeType": "Full time",
+      "locationsText": "Toronto, ON",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": [
+        "R242577"
+      ]
+    }
+  ],
+  "facets": [],
+  "userAuthenticated": false
+}
