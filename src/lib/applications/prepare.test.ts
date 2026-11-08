@@ -152,6 +152,46 @@ describe("prepareApplication", () => {
     expect(events.map((e) => (e.payload as { recheck: boolean }).recheck)).toEqual([false, true]);
   });
 
+  it("re-check that still fails for a new reason updates the reason and drafts the top-choice referral", async () => {
+    const world = await createWorld();
+    const contact = await db.contact.create({
+      data: { userId: world.user.id, name: "Marcus T.", role: "PE", companyId: world.companies.Meta.id, relationship: "Alum", source: "manual" },
+    });
+    bestContactAt.mockResolvedValue(contact);
+    const held = await prepareApplication(world.user.id, world.jobs.meta.id, "user", NOW);
+    expect(held).toMatchObject({ status: "waiting", reason: "No approved campaign yet" });
+    expect(createReferralAskDraft).not.toHaveBeenCalled();
+
+    const version = await approveRules(world);
+    const rechecked = await prepareApplication(world.user.id, world.jobs.meta.id, "muse", NOW);
+    expect(rechecked).toMatchObject({ id: held.id, status: "waiting", reason: "Top choice: referral first", campaignVersionId: version.id });
+    expect((rechecked.checkResult as { topChoice: boolean }).topChoice).toBe(true);
+    expect(createReferralAskDraft).toHaveBeenCalledWith(world.user.id, contact.id, world.jobs.meta.id, "muse");
+    const events = await auditFor(world.user.id, "application.prepared");
+    expect(events.map((e) => e.payload)).toMatchObject([{ recheck: false }, { recheck: true, reason: "Top choice: referral first" }]);
+  });
+
+  it("promotion by the campaign uses the resume the approved campaign names", async () => {
+    const world = await createWorld();
+    const held = await prepareApplication(world.user.id, world.jobs.stripe.id, "user", NOW);
+    expect(held.resumeId).toBe(world.resume.id);
+    const campaignResume = await db.resume.create({ data: { userId: world.user.id, filename: "Campaign.pdf", storageKey: "c" } });
+    await approveRules(world, { resumeId: campaignResume.id });
+
+    const promoted = await prepareApplication(world.user.id, world.jobs.stripe.id, "inroad", NOW);
+    expect(promoted).toMatchObject({ id: held.id, status: "prepared", decidedBy: "campaign", resumeId: campaignResume.id });
+    expect(parseApplicationPacket(promoted.packet)?.resume).toMatchObject({ id: campaignResume.id, filename: "Campaign.pdf" });
+  });
+
+  it("does not promote a waiting application whose posting has closed", async () => {
+    const world = await createWorld();
+    const held = await prepareApplication(world.user.id, world.jobs.stripe.id, "user", NOW);
+    await db.job.update({ where: { id: world.jobs.stripe.id }, data: { closedAt: NOW } });
+    await approveRules(world);
+    await expect(prepareApplication(world.user.id, world.jobs.stripe.id, "muse", NOW)).rejects.toThrow("This posting has closed.");
+    expect(await db.application.findUniqueOrThrow({ where: { id: held.id } })).toMatchObject({ status: "waiting" });
+  });
+
   it("returns a prepared, submitted or skipped application unchanged", async () => {
     const world = await createWorld();
     await approveRules(world);

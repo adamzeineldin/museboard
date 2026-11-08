@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { approveRules, createWorld, NOW, type World } from "@/lib/applications/testing/fixtures";
+import { getSubmissionPacket, prepareApplication } from "@/lib/applications";
+import { approveRules, auditFor, createWorld, NOW, type World } from "@/lib/applications/testing/fixtures";
+import { setCampaignStatus } from "@/lib/campaign";
 import { db, resetDb } from "@/test/db";
 
 const { getSessionUserId, revalidatePath } = vi.hoisted(() => ({ getSessionUserId: vi.fn(), revalidatePath: vi.fn() }));
@@ -53,6 +55,26 @@ describe("activity actions", () => {
     expect(await markSubmittedAction(stripe.id)).toEqual({ ok: true, message: "Marked as submitted" });
     expect(await markSubmittedAction(cloudflare.id)).toEqual({ ok: true, message: "Marked as submitted" });
     expect(revalidatePath).toHaveBeenCalledWith("/activity");
+  });
+
+  it("Mark as submitted goes through the service's release gate: a never-released held row is refused and audited", async () => {
+    const world = await createWorld();
+    getSessionUserId.mockResolvedValue(world.user.id);
+    await approveRules(world, { askFirstCompanies: [] });
+    const stripe = await prepareApplication(world.user.id, world.jobs.stripe.id, "inroad", NOW);
+    const datadog = await prepareApplication(world.user.id, world.jobs.datadog.id, "inroad", NOW);
+    // Muse got Datadog's packet while the campaign was active.
+    expect((await getSubmissionPacket(world.user.id, datadog.id, NOW, "muse")).allowed).toBe(true);
+    await setCampaignStatus(world.user.id, "paused");
+
+    expect(await markSubmittedAction(stripe.id)).toEqual({ ok: false, message: "Not released: Campaign is paused. Nothing was changed." });
+    expect((await appFor(world, "stripe")).status).toBe("prepared");
+    const [refused] = await auditFor(world.user.id, "application.record_refused");
+    expect(refused).toMatchObject({ actor: "user", payload: { applicationId: stripe.id, reason: "Campaign is paused" } });
+
+    // A released packet records a true event even though the campaign is paused now.
+    expect(await markSubmittedAction(datadog.id, "Ref 7")).toEqual({ ok: true, message: "Marked as submitted" });
+    expect((await appFor(world, "datadog")).status).toBe("submitted");
   });
 
   it("skips a waiting row and rejects bad ids and long confirmations", async () => {

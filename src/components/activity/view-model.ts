@@ -77,11 +77,17 @@ export function passToastMessage(summary: PassSummaryLike): string {
 
 export function statsModel(stats: StatsLike): Array<{ value: string; label: string }> {
   return [
-    { value: `${stats.weekCount}/${stats.weeklyCap ?? "–"}`, label: "Applied this week" },
+    // weekCount is the cap reservation (prepared + submitted this week), not applications sent; see "Applied".
+    { value: `${stats.weekCount}/${stats.weeklyCap ?? "–"}`, label: "Weekly cap used" },
     { value: String(stats.waiting), label: "Waiting on you" },
     { value: String(stats.submitted), label: "Applied" },
     { value: String(stats.skipped), label: "Skipped" },
   ];
+}
+
+/** Shown under the list when older submitted/skipped rows were left out. */
+export function hiddenHistoryNote(hidden: number): string {
+  return `${plural(hidden, "older submitted or skipped application")} ${hidden === 1 ? "isn't" : "aren't"} listed. The totals above include them.`;
 }
 
 export function initials(name: string): string {

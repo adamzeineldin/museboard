@@ -17,6 +17,7 @@ const STATE_LABEL: Record<VersionHistoryEntry["state"], string> = {
   in_force: "In force",
   pending: "Pending",
   superseded: "Replaced",
+  replaced: "Replaced before approval",
   unapproved: "Never approved",
 };
 
@@ -73,6 +74,7 @@ export default async function CampaignPage() {
         resumes={resumes}
         inForce={state.rulesInForce}
         pending={pendingRules}
+        pendingVersionId={pendingRules ? (state.pending?.id ?? null) : null}
         pendingNote={pendingNote(history.find((entry) => entry.state === "pending"), user.timezone)}
         status={liveStatus}
         approvedLabel={state.inForce?.approvedAt ? `Approved ${formatDateTime(state.inForce.approvedAt, user.timezone)}` : null}

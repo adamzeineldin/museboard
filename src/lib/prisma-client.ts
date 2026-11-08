@@ -1,5 +1,6 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@/generated/prisma/client";
+import { serializedAdapterFactory } from "./serialized-adapter";
 
 export const DEFAULT_DATABASE_URL = "file:./dev.db";
 
@@ -12,5 +13,6 @@ export function createPrismaClient(url: string = process.env.DATABASE_URL ?? DEF
   if (!url.startsWith("file:")) {
     throw new Error(`DATABASE_URL must be a SQLite "file:" URL for the local adapter, got "${url.split(":")[0]}:..."`);
   }
-  return new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
+  // Serialized: one connection is shared by every request, see ./serialized-adapter.ts.
+  return new PrismaClient({ adapter: serializedAdapterFactory(new PrismaBetterSqlite3({ url })) });
 }

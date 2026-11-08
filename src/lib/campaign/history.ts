@@ -3,7 +3,11 @@ import { db } from "@/lib/db";
 import { actorSchema, approvedViaSchema, type Actor, type ApprovedVia } from "@/lib/types";
 import { findLiveCampaign, listVersions, splitVersions } from "./state";
 
-export type VersionState = "in_force" | "pending" | "superseded" | "unapproved";
+/**
+ * superseded: approved once, later replaced by a newer approval. replaced: a newer proposal replaced it
+ * before it was approved (supersededAt set). unapproved: never approved and never replaced (legacy rows).
+ */
+export type VersionState = "in_force" | "pending" | "superseded" | "replaced" | "unapproved";
 
 export interface VersionHistoryEntry {
   id: string;
@@ -47,10 +51,11 @@ export async function getCampaignHistory(userId: string): Promise<VersionHistory
   if (!campaign) return [];
   const [versions, proposedBy] = await Promise.all([listVersions(db, campaign.id), proposers(userId)]);
   const { inForce, pending } = splitVersions(versions);
-  const stateOf = (id: string, approved: boolean): VersionState => {
-    if (id === inForce?.id) return "in_force";
-    if (id === pending?.id) return "pending";
-    return approved ? "superseded" : "unapproved";
+  const stateOf = (version: (typeof versions)[number]): VersionState => {
+    if (version.id === inForce?.id) return "in_force";
+    if (version.id === pending?.id) return "pending";
+    if (version.approvedAt) return "superseded";
+    return version.supersededAt ? "replaced" : "unapproved";
   };
   return versions
     .map((version, index) => {
@@ -58,7 +63,7 @@ export async function getCampaignHistory(userId: string): Promise<VersionHistory
       return {
         id: version.id,
         number: index + 1,
-        state: stateOf(version.id, version.approvedAt != null),
+        state: stateOf(version),
         createdAt: version.createdAt,
         approvedAt: version.approvedAt,
         approvedVia: via.success ? via.data : null,

@@ -17,7 +17,11 @@ export interface ConsentPanelProps {
   canApprove: boolean;
   canSave: boolean;
   busy: boolean;
-  onApprove: () => void;
+  /** Posted as a hidden input: the pending version whose summary is shown ("" when none is stored). */
+  approveVersionId: string;
+  /** Posted as a hidden input: JSON of the rules the summary above was computed from. */
+  approveRules: string;
+  onApprove: (formData: FormData) => void;
   onSave: () => void;
   onTogglePause: () => void;
   onRevoke: () => void;
@@ -48,8 +52,16 @@ export function ConsentPanel(props: ConsentPanelProps) {
         <StateChip status={status} />
         {props.approvedLabel ? <span className="muted text-[.82rem]">{props.approvedLabel}</span> : null}
       </div>
-      <div className="actions">
-        <Button variant="primary" onClick={props.onApprove} disabled={!props.canApprove || busy}>
+      <form
+        className="actions"
+        onSubmit={(event) => {
+          event.preventDefault();
+          props.onApprove(new FormData(event.currentTarget));
+        }}
+      >
+        <input type="hidden" name="versionId" value={props.approveVersionId} />
+        <input type="hidden" name="rules" value={props.approveRules} />
+        <Button type="submit" variant="primary" disabled={!props.canApprove || busy}>
           {props.approveLabel}
         </Button>
         <Button onClick={props.onSave} disabled={!props.canSave || busy}>
@@ -65,7 +77,7 @@ export function ConsentPanel(props: ConsentPanelProps) {
             </Button>
           </>
         ) : null}
-      </div>
+      </form>
     </section>
   );
 }

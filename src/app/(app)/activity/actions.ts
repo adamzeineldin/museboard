@@ -5,7 +5,6 @@ import { z } from "zod";
 import { passToastMessage } from "@/components/activity/view-model";
 import {
   approveWaiting,
-  checkRelease,
   CONFIRMATION_MAX,
   isApplicationError,
   recordSubmission,
@@ -31,15 +30,13 @@ function refresh(): void {
   revalidatePath("/", "layout");
 }
 
-/** The release check refused: a user-safe reason, not an internal error. */
-class HeldError extends Error {}
-
 function failure(scope: string, userId: string, error: unknown): ActivityActionResult {
-  if (isApplicationError(error)) return { ok: false, message: error.message };
-  if (error instanceof HeldError) {
-    const reason = error.message.endsWith(".") ? error.message : `${error.message}.`;
+  // recordSubmission's release gate refused (and audited it): show the reason, not an internal error.
+  if (isApplicationError(error) && error.code === "not_released" && error.reason) {
+    const reason = error.reason.endsWith(".") ? error.reason : `${error.reason}.`;
     return { ok: false, message: `Not released: ${reason} Nothing was changed.` };
   }
+  if (isApplicationError(error)) return { ok: false, message: error.message };
   console.error(`[activity] ${scope} failed`, { userId, error: error instanceof Error ? error.message : error });
   return { ok: false, message: "Something went wrong. Nothing was changed. Try again." };
 }
@@ -80,9 +77,7 @@ export async function markSubmittedAction(applicationId: unknown, confirmationTe
   const confirmation = confirmationSchema.safeParse(confirmationText ?? undefined);
   if (!confirmation.success) return { ok: false, message: "That confirmation is too long." };
   return withApplication("record submission", applicationId, async (userId, id) => {
-    // Same release check getSubmissionPacket gives Muse: a held packet can't be marked submitted.
-    const release = await checkRelease(userId, id);
-    if (!release.allowed) throw new HeldError(release.reason);
+    // recordSubmission runs the same release gate as record_submission for Muse.
     await recordSubmission(userId, id, "user", confirmation.data);
     return "Marked as submitted";
   });

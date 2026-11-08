@@ -20,9 +20,9 @@ src/lib/rules/              checkApplication + ISO-week helpers (pure, no DB)
 src/lib/campaign/           versions, rules-in-force, plain-English summary, approve/pause/resume/revoke
 src/lib/applications/       prepare, approve, skip, submit packet, record submission, weekly pass, weekCount
 src/lib/matching/           embedder interface, local embedder, scoring, recomputeMatches
-src/lib/resume/             upload storage + text extraction (pdf, docx, txt)
+src/lib/resume/             upload storage + text extraction (pdf, docx, txt); zip-guard.ts caps a DOCX's unpacked size (20 MB) before mammoth
 src/lib/outreach/           contacts, CSV import, draft generation, referral packet, best contact
-src/lib/audit.ts            writeAudit(userId, actor, action, payload)
+src/lib/audit.ts            writeAudit(userId, actor, action, payload, client?)
 src/lib/digest/             weekly digest builder + mailer, signed pause/unsubscribe links, Settings preference
 src/lib/connector/          connector tokens (create, verify, list, revoke) + Settings actions
 src/mcp/                    createInroadMcpServer({ userId, scope, now? }), tool definitions, /mcp HTTP pipeline, CLI
@@ -39,6 +39,13 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - SQLite for local dev (`DATABASE_URL="file:./dev.db"`); schema must stay Postgres-compatible (no SQLite-only tricks).
   Enum-like fields are `String` with the allowed values validated in TS (`src/lib/types.ts` exports the unions).
 - Every application Inroad prepares writes an `AuditEvent` with the rule-check result and reason (ground rule 6).
+  State changes on the consent path (campaign propose/approve/pause/resume/revoke; application prepare, approve, skip,
+  submit) write their audit row with the transaction client (`writeAudit(..., tx)`), so the change and its audit commit
+  or roll back together. Expected refusals inside those transactions return a result and are thrown after it resolves.
+- One SQLite connection serves every request in a process (`PrismaBetterSqlite3`). Its own mutex only serializes
+  interactive transactions, so a plain query from another request would run inside an open `BEGIN` (and vanish with its
+  rollback). `src/lib/serialized-adapter.ts` wraps the adapter so top-level queries and transactions share one lock.
+  Consequence: inside a `$transaction` callback use `tx`, never `db` (a `db` call there waits on itself until timeout).
 - Outreach is never sent by Inroad. No feature offers rewards for referrals. Nothing scrapes social media,
   LinkedIn, Meta Careers or Google Careers. Job data comes only from Greenhouse, Lever, Ashby and Workday public job-board APIs.
 - Companies with no public ATS feed (e.g. Meta, Google in the seed) have `ats = null` and are never scraped.
@@ -48,7 +55,9 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 
 ## Schema additions beyond the brief (and why)
 - `Job.description String?`, `Job.compensation String?`, `Job.department String?` — scoring uses title + description; cards show pay.
-- `Company.name @unique`, `Company.ats String?` (null = no public feed).
+- `Company.name @unique`, `Company.ats String?` (null = no public feed). The unique index is case-sensitive, so every
+  writer matches names with `normalizeCompanyName` (`src/lib/company-name.ts`) first: contact/CSV entry and the worker's
+  ingest reuse an existing row whatever its casing, and only create one when none matches.
 - `Application @@unique([userId, jobId])` — prevents duplicate applications. Extra fields: `packet Json?`, `checkResult Json?`,
   `confirmationText String?`, `decidedAt DateTime?`.
 - `Outreach.companyId`, `Outreach.createdAt`, `Outreach.sentAt?`.
@@ -63,7 +72,23 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
 - `prepared` — cleared to submit: either the rule check passed (`decidedBy: 'campaign'`) or the user approved it
   (`decidedBy: 'user'`, reason `Approved by you`). Holds the packet.
 - `waiting` — rule check failed; the user must Approve or Skip. `reason` is the failing check's reason.
+  Re-preparing a waiting row (`prepareApplication`, e.g. Muse's `prepare_application`) re-runs the check inside a
+  transaction that only writes while the row is still `waiting` (a concurrent Skip/Approve wins): a pass promotes it to
+  `prepared`/`campaign` with the **campaign's resume** (`pickResume`: the version in force's `resumeId`, else the default)
+  and a packet built for it; a failure with a different reason or top-choice flag updates `reason`, `checkResult` and
+  `campaignVersionId` (still waiting), audits `application.prepared` (`recheck: true`) and, for a top choice, drafts the
+  referral ask. The same failure again changes nothing. Rows the user approves keep their own resume.
+- Closed postings (`Job.closedAt` set by the ingest): `prepareApplication` refuses them (`ApplicationError('closed')`,
+  "This posting has closed.") whether or not a waiting row exists, `approveWaiting` refuses them, and the release check
+  (`getSubmissionPacket`, `checkRelease`, `getReleaseVerdicts`) refuses every prepared row on a closed job, user-approved
+  ones included, with reason `This posting has closed.`
 - `submitted` — Muse called `record_submission`, or the user marked it submitted on the web. `submittedAt` set.
+  `recordSubmission` (shared by both) only records a `prepared` application when (a) its packet was released for the
+  current decision (`getSubmissionPacket` returned allowed and stamped `Application.packetReleasedAt`; every new
+  decision resets it to null), or (b) the release check allows it right now. Muse can only submit with the packet, so a
+  released packet stays recordable after a pause or a rules edit (it records a true event). Anything else throws
+  `ApplicationError('not_released')` (with `reason`) and audits `application.record_refused` with the caller's actor.
+  Already submitted stays idempotent. `application.submitted` records `allowedBy: 'packet_released'|'release_check'`.
 - `skipped` — the user skipped it.
 
 ## weekCount (cap accounting)
@@ -79,9 +104,27 @@ over, never the older ones (cap 2, two campaign-prepared, the user approves a th
 week, excluding itself. User-approved rows are always releasable.
 
 ## Campaign versions
-- Newest version with `approvedAt` set is in force. A newer unapproved version is "pending" and changes nothing.
-- Editing rules on the web or via `propose_campaign` creates (or replaces the existing) pending version.
-- Approve = set `approvedAt` (+ `approvedVia`) on the pending version. Pause/Resume/Revoke change `Campaign.status`.
+- Newest version with `approvedAt` set is in force. The newest unapproved version created after it that has no
+  `supersededAt` is "pending" and changes nothing.
+- A version's rules are **immutable once created**. Every proposal (web Save or Approve with unsaved edits, or
+  `propose_campaign`) creates a NEW version, and the previous pending version gets `supersededAt = now`. So a summary
+  shown for a `versionId` always describes exactly what approving that id would put in force.
+  - Rules equal (`rulesEqual`: list order and company-name case ignored) to the current pending version: that version is
+    returned unchanged (no churn, no `campaign.proposed` entry).
+  - Rules equal to the version in force with nothing pending: a no-op that returns the version in force ("nothing changed").
+- `proposeRules(userId, rules, via, now?) => { version, outcome: 'created'|'unchanged_pending'|'unchanged_in_force',
+  supersededVersionId }`; `proposeVersion` is the contract wrapper returning `version`. `campaign.proposed` records
+  `supersededVersionId`.
+- Approve = set `approvedAt` (+ `approvedVia`) on `versionId`, which must be the **current pending version**. Any other
+  unapproved id (superseded, or older than the version in force) throws `CampaignError('stale_version')`: "These rules
+  changed after you reviewed them. Review the latest summary and approve again." Nothing is approved.
+- The web Approve form posts the `versionId` of the pending version whose summary it shows (hidden input) plus the rules
+  the summary was computed from. If those rules are that version's stored rules, exactly that id is approved (stale if a
+  newer proposal replaced it; the page then refreshes to the latest summary). If the form has unsaved edits, the action
+  saves them as a new version and approves that new id in the same action, so what is on screen is what is approved.
+- Version history labels: In force, Pending, Replaced (approved, then a newer approval), Replaced before approval
+  (`supersededAt`), Never approved (legacy rows).
+- Pause/Resume/Revoke change `Campaign.status`.
 - Revoked/ended campaigns are terminal; a new campaign starts with a fresh first version.
 
 ## Cross-module function contract (implementers must keep these signatures)
@@ -92,7 +135,7 @@ checkApplication(job: RuleJob, match: RuleMatch | null, campaign: RuleCampaign |
 isoWeekStart(now: Date, timeZone: string): Date   // instant of Monday 00:00 local
 // src/lib/campaign
 getCampaignState(userId): Promise<{ campaign, inForce: CampaignVersion|null, pending: CampaignVersion|null, rulesInForce: CampaignRules|null }>
-summarizeRules(rules: CampaignRules, ctx: { resumeName: string }): string[]   // plain sentences for "What you're approving"
+summarizeRules(rules: CampaignRules, ctx: { resumeName: string }): string[]   // plain sentences for "What you're approving"; the end date always includes its year ("Dec 15, 2026")
 proposeVersion(userId, rules, via: 'web'|'muse'): Promise<CampaignVersion>
 approveVersion(userId, versionId, via: 'web'|'muse'): Promise<CampaignVersion>
 setCampaignStatus(userId, status: 'active'|'paused'|'revoked'): Promise<Campaign>
@@ -111,7 +154,7 @@ draftOutreach(userId, contactId, kind: 'coffee_chat'|'referral_ask', jobId?): Pr
 // src/lib/matching
 recomputeMatches(userId): Promise<number>
 // src/lib/audit
-writeAudit(userId, actor: 'user'|'inroad'|'muse', action: string, payload: unknown): Promise<void>
+writeAudit(userId, actor: 'user'|'inroad'|'muse', action: string, payload: unknown, client: db | tx = db): Promise<void>
 // added for milestones 4-6
 // src/lib/matching (pure module fit-summary.ts, no server-only)
 fitSummary(resumeText: string, job: { title, description, companyName }): [string, string, string]   // three short lines
@@ -131,11 +174,15 @@ loadRuleCampaign(userId, timeZone, client?): Promise<{ ruleCampaign: RuleCampaig
   // The Jobs feed loads it once per request and runs checkApplication per job; it must stay equal to evaluateJobForUser.
 proposeVersion(userId, rules, via, now?)   approveVersion(userId, versionId, via, now?)
 getCampaignHistory(userId); versionProposedBy(userId, versionId); rulesEqual(a, b); summarizeRuleParts(rules, ctx)
+proposeRules(userId, rules, via, now?); findOwnVersion(userId, versionId)   // see "Campaign versions"
 CampaignError (code + user-safe message)
 // src/lib/applications
 getSubmissionPacket(userId, applicationId, now?, actor: Actor = 'inroad')   // audits application.packet_requested
 runWeeklyPass(...) => { submitted, waiting, referralDrafts, reason?, failed? }   // `submitted` = cleared to submit (prepared)
-getActivity(userId, timeZone, now?); ApplicationError (code + user-safe message)
+getActivity(userId, timeZone, now?, options?: { historyLimit? }); ApplicationError (code + user-safe message)
+  // every waiting/prepared row is listed; submitted/skipped rows are capped (500); stats are counted over ALL rows
+  // (groupBy) and `hiddenHistory` says how many history rows were left out (Activity shows a note).
+  // Activity's "Weekly cap used" stat is weekCount (prepared + submitted this week); "Applied" counts submitted.
 // src/lib/matching
 recomputeMatches(userId, deps?: { embedder? })
 // src/lib/outreach
@@ -170,8 +217,9 @@ from `evaluateJobForUser`. A user clicking **Prepare** on any open job always cr
 ```ts
 // src/lib/applications (release check, shared by Muse and the web)
 getReleaseVerdicts(userId, now?): Promise<Map<applicationId, { allowed, reason }>>   // prepared rows only, read-only, no audit
-checkRelease(userId, applicationId, now?): Promise<{ allowed, reason }>             // read-only; the web checks it before "Mark as submitted"
-getSubmissionPacket(...)                                                           // same verdict, plus the packet; audits application.packet_requested
+checkRelease(userId, applicationId, now?): Promise<{ allowed, reason }>             // read-only
+getSubmissionPacket(...)                                                           // same verdict, plus the packet; audits application.packet_requested; sets packetReleasedAt when allowed
+recordSubmission(userId, applicationId, actor, confirmationText?, now?)            // release gate inside the service (see Application lifecycle)
 approveWaiting(userId, applicationId, now?)                                        // optional now (tests)
 getActivity(...).items[].release: { allowed, reason } | null                       // Activity shows a refused prepared row as "Held: <reason>"
 // The Jobs card chip and find_roles use the same verdicts: a refused prepared row is "Held: <reason>" (find_roles status 'held').

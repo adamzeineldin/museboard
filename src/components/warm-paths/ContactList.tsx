@@ -1,5 +1,5 @@
-import { ButtonLink } from "@/components/ui";
 import type { OutreachKind } from "@/lib/types";
+import { DraftAskLink } from "./DraftAskLink";
 import type { ContactView } from "./load";
 import { warmPathsHref } from "./selection";
 
@@ -34,16 +34,12 @@ export function ContactList({ contacts, selectedId, kind }: ContactListProps) {
               </div>
             </div>
             <div className="side">
-              <ButtonLink
+              <DraftAskLink
                 href={warmPathsHref({ contactId: contact.id, jobId: null, kind })}
-                size="small"
-                variant={selected ? "primary" : "default"}
-                aria-current={selected ? "true" : undefined}
-                aria-label={selected ? `Drafting ask to ${contact.name}` : `Draft ask to ${contact.name}`}
-                scroll={false}
-              >
-                {selected ? "Drafting" : "Draft ask"}
-              </ButtonLink>
+                contactId={contact.id}
+                contactName={contact.name}
+                selected={selected}
+              />
             </div>
           </li>
         );

@@ -22,7 +22,8 @@ export function campaignCardModel(input: CampaignCardInput | null): CampaignCard
     input.weekCount === null || input.weeklyCap <= 0 ? 0 : Math.min(100, (input.weekCount / input.weeklyCap) * 100);
   return {
     kind: "active",
-    heading: `${state} · ${count} of ${input.weeklyCap} this week`,
+    // The count is the cap reservation (prepared + submitted), so say "used", not "applied".
+    heading: `${state} · ${count} of ${input.weeklyCap} used this week`,
     meterPercent,
     endsLabel: `Ends ${formatShortDate(input.endsOn)}`,
   };

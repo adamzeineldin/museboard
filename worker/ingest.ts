@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { normalizeCompanyName } from "@/lib/company-name";
 import { scraperRunSchema, type CompanyResult, type ScrapedJob } from "./runSchema";
 
 // Writes one scraper run into the DB. Rules (from the scraper contract):
@@ -76,13 +77,23 @@ function jobFields(job: ScrapedJob) {
   };
 }
 
+/**
+ * The company row for a scraped name: an exact match, else a case-insensitive one (a user may have created
+ * "stripe" from a contact or CSV before the first scrape), else a new row. Existing rows keep their
+ * ats/atsConfig (owned by seed/admin config). The Company table is small, so matching runs in memory.
+ */
+async function companyFor(tx: Prisma.TransactionClient, result: CompanyResult): Promise<{ id: string }> {
+  const exact = await tx.company.findUnique({ where: { name: result.company }, select: { id: true } });
+  if (exact) return exact;
+  const key = normalizeCompanyName(result.company);
+  const all = await tx.company.findMany({ select: { id: true, name: true }, orderBy: { id: "asc" } });
+  const match = all.find((row) => normalizeCompanyName(row.name) === key);
+  if (match) return { id: match.id };
+  return tx.company.create({ data: { name: result.company, ats: result.ats }, select: { id: true } });
+}
+
 async function ingestCompany(tx: Prisma.TransactionClient, result: CompanyResult, now: Date): Promise<CompanyCounts> {
-  // Existing rows keep their ats/atsConfig (owned by seed/admin config); only missing companies are created.
-  const company = await tx.company.upsert({
-    where: { name: result.company },
-    create: { name: result.company, ats: result.ats },
-    update: {},
-  });
+  const company = await companyFor(tx, result);
   const jobs = keptJobs(result.jobs);
   const ids = jobs.map((job) => job.id);
   const existing = await tx.job.findMany({ where: { id: { in: ids } }, select: { id: true, closedAt: true } });

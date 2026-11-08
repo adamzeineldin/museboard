@@ -1,7 +1,14 @@
 import "server-only";
 import { z } from "zod";
 import type { CampaignVersion } from "@/generated/prisma/client";
-import { approveVersion, getCampaignState, proposeVersion, summarizeRules } from "@/lib/campaign";
+import {
+  approveVersion,
+  getCampaignState,
+  isCampaignError,
+  proposeRules,
+  summarizeRules,
+  type ProposalResult,
+} from "@/lib/campaign";
 import { db } from "@/lib/db";
 import { getDefaultResume } from "@/lib/resume";
 import { CampaignRulesSchema, parseCampaignRules, type CampaignRules } from "@/lib/types";
@@ -23,6 +30,19 @@ const VersionSchema = z.object({
 type VersionView = z.infer<typeof VersionSchema>;
 
 const NOTHING_CHANGES = "Nothing changes until the user approves this version; the version in force keeps governing.";
+const ALREADY_IN_FORCE = "These rules are already the rules in force. Nothing changed and there is nothing to approve.";
+const ALREADY_PENDING = "These rules are already the pending version, so nothing new was saved.";
+const STALE_NEXT_STEP =
+  "Call get_campaign (or propose_campaign again) to get the current pending versionId and its summary, show that summary to the user, and ask again before calling approve_campaign.";
+
+function proposalMessage(result: ProposalResult): string {
+  if (result.outcome === "unchanged_in_force") return ALREADY_IN_FORCE;
+  const replaced = result.supersededVersionId
+    ? ` It replaces the earlier pending version ${result.supersededVersionId}, which can no longer be approved.`
+    : "";
+  const prefix = result.outcome === "unchanged_pending" ? `${ALREADY_PENDING} ` : "";
+  return `${prefix}${NOTHING_CHANGES}${replaced}`;
+}
 
 async function resumeName(userId: string, resumeId: string): Promise<string> {
   const resume = await db.resume.findFirst({ where: { id: resumeId, userId }, select: { filename: true } });
@@ -87,9 +107,10 @@ export const proposeCampaignTool = defineTool({
   title: "Propose campaign rules",
   museClass: "write",
   description: [
-    "Muse class: Write. Side effect: saves the rules as a pending, unapproved campaign version (replacing any earlier pending version).",
+    "Muse class: Write. Side effect: saves the rules as a new pending, unapproved campaign version. Any earlier pending version is replaced and can no longer be approved.",
+    "Proposing rules identical to the pending version returns that version unchanged; rules identical to the ones in force (with nothing pending) change nothing.",
     NOTHING_CHANGES,
-    "Returns the plain-English summary of the proposed rules and its versionId. Show the user that summary; approving it is a separate step (approve_campaign).",
+    "Returns the plain-English summary of the proposed rules and its versionId. Show the user that summary; approving it is a separate step (approve_campaign) for that exact versionId.",
     "rules: roles (intern, newgrad), autoCompanies, askFirstCompanies (companies Inroad never applies to without asking; it drafts a referral ask instead),",
     "resumeId, weeklyCap (1-20), minMatch (50-100) and endsOn (YYYY-MM-DD).",
   ].join(" "),
@@ -97,21 +118,48 @@ export const proposeCampaignTool = defineTool({
   hints: { destructiveHint: false, idempotentHint: true },
   output: z.object({
     versionId: z.string(),
-    approved: z.literal(false),
+    /** true only when nothing changed because these rules are already in force. */
+    approved: z.boolean(),
+    /** false when the proposal matched the pending version or the rules in force. */
+    changed: z.boolean(),
     summary: z.array(z.string()),
     inForceVersionId: z.string().nullable(),
+    replacedVersionId: z.string().nullable(),
     message: z.string(),
   }),
   auditArgs: (input) => ({ rules: input.rules }),
   async run(ctx, input) {
-    const version = await proposeVersion(ctx.userId, input.rules, "muse", ctx.now());
-    const [state, summary] = await Promise.all([getCampaignState(ctx.userId), summaryFor(ctx.userId, input.rules)]);
+    const result = await proposeRules(ctx.userId, input.rules, "muse", ctx.now());
+    // Summarize the stored rules of the returned version: exactly what approve_campaign(versionId) approves.
+    const stored = parseCampaignRules(result.version.rules);
+    if (!stored) throw new ToolRefusal("Those rules could not be saved. Review them and try again.");
+    const [state, summary] = await Promise.all([getCampaignState(ctx.userId), summaryFor(ctx.userId, stored)]);
+    const message = proposalMessage(result);
+    const lead =
+      result.outcome === "created" ? "Proposed new campaign rules (pending)." : "No change to the campaign rules.";
     return {
-      data: { versionId: version.id, approved: false as const, summary, inForceVersionId: state.inForce?.id ?? null, message: NOTHING_CHANGES },
-      summary: `Proposed new campaign rules (pending). ${NOTHING_CHANGES}`,
+      data: {
+        versionId: result.version.id,
+        approved: result.version.approvedAt !== null,
+        changed: result.outcome === "created",
+        summary,
+        inForceVersionId: state.inForce?.id ?? null,
+        replacedVersionId: result.supersededVersionId,
+        message,
+      },
+      summary: `${lead} ${message}`,
     };
   },
 });
+
+async function approveOrExplain(userId: string, versionId: string, now: Date): Promise<CampaignVersion> {
+  try {
+    return await approveVersion(userId, versionId, "muse", now);
+  } catch (error) {
+    if (isCampaignError(error) && error.code === "stale_version") throw new ToolRefusal(`${error.message} ${STALE_NEXT_STEP}`);
+    throw error;
+  }
+}
 
 export const approveCampaignTool = defineTool({
   name: "approve_campaign",
@@ -120,8 +168,9 @@ export const approveCampaignTool = defineTool({
   description: [
     "Muse class: Sensitive write. Side effect: approves a pending campaign version, recorded as approved via Muse.",
     "From then on Inroad prepares applications under these rules (the version replaces the rules in force; a first approval also activates the campaign).",
-    "Before calling this, Muse must show the user the summary returned by propose_campaign for this exact versionId and get an explicit yes from the user.",
-    "If the rules change after that, propose them again and ask again.",
+    "Before calling this, Muse must show the user the summary returned by propose_campaign (or get_campaign's pending.summary) for this exact versionId and get an explicit yes from the user.",
+    "A version's rules never change. Only the current pending version can be approved: if the rules were changed (on the web or by another proposal) after the summary was shown,",
+    "this returns an error saying the rules changed and approves nothing; then fetch the latest summary, show it, and ask again.",
   ].join(" "),
   input: z.strictObject({ versionId: idSchema("versionId") }),
   hints: { destructiveHint: true, idempotentHint: false },
@@ -134,7 +183,7 @@ export const approveCampaignTool = defineTool({
   }),
   auditArgs: (input) => ({ versionId: input.versionId }),
   async run(ctx, input) {
-    const version = await approveVersion(ctx.userId, input.versionId, "muse", ctx.now());
+    const version = await approveOrExplain(ctx.userId, input.versionId, ctx.now());
     const rules = parseCampaignRules(version.rules);
     if (!version.approvedAt || !rules) throw new ToolRefusal("That version could not be approved. Review the rules and try again.");
     const state = await getCampaignState(ctx.userId);

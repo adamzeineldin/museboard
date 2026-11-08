@@ -1,4 +1,5 @@
-import { MAX_PARSED_TEXT_CHARS, type ResumeKind } from "./constants";
+import { MAX_DOCX_UNCOMPRESSED_BYTES, MAX_PARSED_TEXT_CHARS, type ResumeKind } from "./constants";
+import { assertZipWithinLimits, ZipGuardError } from "./zip-guard";
 
 // Resume text extraction: unpdf for PDF, mammoth for DOCX, UTF-8 for TXT. Failures become a
 // ResumeExtractionError whose message is safe to show the user.
@@ -36,7 +37,17 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
   return text;
 }
 
+const DOCX_TOO_LARGE =
+  "That DOCX is too large to read once unpacked. Save it again without embedded media, or upload a PDF.";
+
 async function extractDocx(bytes: Uint8Array): Promise<string> {
+  // Bound the unpacked size before mammoth inflates anything (zip bombs).
+  try {
+    assertZipWithinLimits(bytes, MAX_DOCX_UNCOMPRESSED_BYTES);
+  } catch (error) {
+    if (error instanceof ZipGuardError && error.failure === "too_large") throw new ResumeExtractionError(DOCX_TOO_LARGE, { cause: error });
+    throw error;
+  }
   const mammoth = await import("mammoth");
   const extractRawText = mammoth.extractRawText ?? mammoth.default.extractRawText;
   const result = await extractRawText({ buffer: Buffer.from(bytes) });
@@ -54,6 +65,7 @@ export async function extractResumeText(bytes: Uint8Array, kind: ResumeKind): Pr
   try {
     raw = kind === "pdf" ? await extractPdf(bytes) : kind === "docx" ? await extractDocx(bytes) : extractTxt(bytes);
   } catch (error) {
+    if (error instanceof ResumeExtractionError) throw error;
     throw new ResumeExtractionError(
       `We couldn't read that ${LABEL[kind]}. It may be damaged or password-protected. Try exporting it again.`,
       { cause: error },

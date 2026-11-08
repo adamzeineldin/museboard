@@ -2,7 +2,7 @@ import "server-only";
 
 // Applications service. Contract: docs/ARCHITECTURE.md "Cross-module function contract",
 // "Application lifecycle", "weekCount" and "Weekly pass candidates".
-export { getActivity, sortActivity, type ActivityData, type ActivityEvent, type ActivityItem, type ActivityStats } from "./activity";
+export { getActivity, sortActivity, type ActivityData, type ActivityEvent, type ActivityOptions, type ActivityItem, type ActivityStats } from "./activity";
 export { approveWaiting, skipWaiting } from "./decide";
 export { APPLICATION_REASONS, ApplicationError, isApplicationError, type ApplicationErrorCode } from "./errors";
 export { evaluateJobForUser } from "./evaluate";

@@ -12,15 +12,17 @@ import { Button, EmptyState } from "@/components/ui";
 import { Toast, useToast } from "../campaign/Toast";
 import { ActivityRow } from "./ActivityRow";
 import type { ActivityRowModel } from "./rows";
-import { statsModel, type StatsLike } from "./view-model";
+import { hiddenHistoryNote, statsModel, type StatsLike } from "./view-model";
 
 export interface ActivityViewProps {
   rows: ActivityRowModel[];
   stats: StatsLike;
   campaignActive: boolean;
+  /** Older submitted/skipped applications not listed (the stats still count them). */
+  hiddenHistory?: number;
 }
 
-export function ActivityView({ rows, stats, campaignActive }: ActivityViewProps) {
+export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }: ActivityViewProps) {
   const [busy, startTransition] = useTransition();
   const toast = useToast();
 
@@ -70,6 +72,7 @@ export function ActivityView({ rows, stats, campaignActive }: ActivityViewProps)
           ))}
         </ul>
       )}
+      {hiddenHistory > 0 ? <p className="muted text-[.82rem]">{hiddenHistoryNote(hiddenHistory)}</p> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </>
   );

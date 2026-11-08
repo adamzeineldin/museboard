@@ -1,7 +1,7 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DELETE, GET, POST } from "@/app/mcp/route";
-import { getCampaignState } from "@/lib/campaign";
+import { getCampaignState, proposeVersion, STALE_VERSION_MESSAGE } from "@/lib/campaign";
 import { RULE_REASONS } from "@/lib/rules";
 import { db, resetDb } from "@/test/db";
 import { campaignRules, JOB_IDS, useTempStorage } from "@/test/integration/world";
@@ -134,6 +134,51 @@ describe("campaign tools", () => {
 
     const actions = (await db.auditEvent.findMany({ where: { userId: world.user.id, actor: "muse" } })).map((e) => e.action);
     expect(actions).toEqual(expect.arrayContaining(["muse.propose_campaign", "campaign.proposed", "muse.approve_campaign", "campaign.approved"]));
+  });
+
+  it("approve_campaign refuses a version whose rules changed after Muse showed its summary, and approves nothing", async () => {
+    const base = campaignRules(world.resumeId, new Date());
+    const shown = await call(client, "propose_campaign", { rules: { ...base, weeklyCap: 3 } });
+    const x = shown.data.versionId as string;
+    expect(shown.data).toMatchObject({ changed: true, approved: false, replacedVersionId: null });
+
+    // The user saves different rules on the web while Muse is showing the summary for X.
+    const y = (await proposeVersion(world.user.id, { ...base, weeklyCap: 6 }, "web")).id;
+    expect(y).not.toBe(x);
+    expect(await db.campaignVersion.findUniqueOrThrow({ where: { id: x } })).toMatchObject({ rules: { weeklyCap: 3 }, approvedAt: null });
+
+    const stale = await call(client, "approve_campaign", { versionId: x });
+    expect(stale.isError).toBe(true);
+    expect(stale.text).toContain(STALE_VERSION_MESSAGE);
+    expect(stale.text).toMatch(/get_campaign/);
+    const state = await getCampaignState(world.user.id);
+    expect(state.inForce?.id).toBe(world.versionId);
+    expect(state.pending?.id).toBe(y);
+    expect(await db.auditEvent.count({ where: { userId: world.user.id, action: "campaign.approved", actor: "muse" } })).toBe(0);
+
+    const pending = await call(client, "get_campaign");
+    expect(pending.data).toMatchObject({ pending: { versionId: y, rules: { weeklyCap: 6 } } });
+    const approved = await call(client, "approve_campaign", { versionId: y });
+    expect(approved).toMatchObject({ isError: false, data: { versionId: y, approvedVia: "muse" } });
+    expect((await getCampaignState(world.user.id)).rulesInForce?.weeklyCap).toBe(6);
+  });
+
+  it("a second propose_campaign supersedes the first; identical proposals change nothing", async () => {
+    const base = campaignRules(world.resumeId, new Date());
+    const first = (await call(client, "propose_campaign", { rules: { ...base, weeklyCap: 3 } })).data.versionId as string;
+    const second = await call(client, "propose_campaign", { rules: { ...base, weeklyCap: 4 } });
+    expect(second.data).toMatchObject({ changed: true, replacedVersionId: first });
+    expect(second.data.summary).toEqual(expect.arrayContaining([expect.stringMatching(/^At most 4 applications a week/)]));
+    expect((await call(client, "approve_campaign", { versionId: first })).text).toContain(STALE_VERSION_MESSAGE);
+
+    const repeat = await call(client, "propose_campaign", { rules: { ...base, weeklyCap: 4 } });
+    expect(repeat.data).toMatchObject({ versionId: second.data.versionId, changed: false, approved: false, replacedVersionId: null });
+
+    await call(client, "approve_campaign", { versionId: second.data.versionId });
+    const inForce = await call(client, "propose_campaign", { rules: { ...base, weeklyCap: 4 } });
+    expect(inForce).toMatchObject({ isError: false, data: { versionId: second.data.versionId, changed: false, approved: true } });
+    expect(inForce.text).toMatch(/already the rules in force/);
+    expect((await call(client, "get_campaign")).data).toMatchObject({ pending: null });
   });
 
   it("returns user-safe errors for invalid rules, unknown versions and double approval", async () => {

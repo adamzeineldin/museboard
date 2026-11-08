@@ -17,7 +17,7 @@ describe("summarizeRules", () => {
     expect(summarizeRules(rules, { resumeName: "Resume_v3.pdf" })).toEqual([
       "Apply to internships at Stripe, Datadog, Capital One, Cloudflare, Ramp.",
       "Use Resume_v3.pdf, only for roles at 75%+ match.",
-      "At most 5 applications a week, until Dec 15.",
+      "At most 5 applications a week, until Dec 15, 2026.",
       "Never apply to Meta, Google without asking me. Draft a referral ask instead.",
       "Anything else, or any change to these rules, needs a new yes from me.",
     ]);
@@ -41,7 +41,16 @@ describe("summarizeRules", () => {
 
   it("uses the singular for a weekly cap of one", () => {
     expect(summarizeRules({ ...rules, weeklyCap: 1 }, { resumeName: "r.pdf" })[2]).toBe(
-      "At most 1 application a week, until Dec 15.",
+      "At most 1 application a week, until Dec 15, 2026.",
+    );
+  });
+
+  it("always names the end date's year, so campaigns a year apart never read the same", () => {
+    expect(summarizeRules({ ...rules, endsOn: "2027-12-15" }, { resumeName: "r.pdf" })[2]).toBe(
+      "At most 5 applications a week, until Dec 15, 2027.",
+    );
+    expect(summarizeRules({ ...rules, endsOn: "2031-12-15" }, { resumeName: "r.pdf" })[2]).toBe(
+      "At most 5 applications a week, until Dec 15, 2031.",
     );
   });
 
@@ -57,7 +66,7 @@ describe("summarizeRuleParts", () => {
       "internships",
       "Stripe, Datadog, Capital One, Cloudflare, Ramp",
     ]);
-    expect(third.filter((part) => part.strong).map((part) => part.text)).toEqual(["5 applications a week", "Dec 15"]);
+    expect(third.filter((part) => part.strong).map((part) => part.text)).toEqual(["5 applications a week", "Dec 15, 2026"]);
   });
 
   it("joins back into exactly the plain sentences", () => {

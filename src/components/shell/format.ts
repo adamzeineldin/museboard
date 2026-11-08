@@ -5,6 +5,13 @@ export function formatShortDate(isoDay: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+/** "2026-12-15" -> "Dec 15, 2026". Used wherever the year matters, e.g. the consent summary's end date. */
+export function formatLongDate(isoDay: string): string {
+  const date = new Date(`${isoDay}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return isoDay;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

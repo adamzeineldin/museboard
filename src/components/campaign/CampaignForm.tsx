@@ -14,6 +14,8 @@ export interface CampaignFormProps {
   resumes: Array<{ id: string; filename: string }>;
   inForce: CampaignRules | null;
   pending: CampaignRules | null;
+  /** Id of the stored pending version (its rules are `pending`), or null. Posted with Approve. */
+  pendingVersionId: string | null;
   pendingNote: string | null;
   status: "active" | "paused" | null;
   approvedLabel: string | null;
@@ -33,6 +35,13 @@ export function CampaignForm(props: CampaignFormProps) {
   const [draft, setDraft] = useState<CampaignDraft>(() =>
     initialDraft({ pending: props.pending, inForce: props.inForce, defaults: props.defaults }),
   );
+  // When the stored pending version changes (after a save, an approval, or a refused stale approval that
+  // refreshed the page), show its rules, so the summary on screen is always the version Approve posts.
+  const [shownVersionId, setShownVersionId] = useState(props.pendingVersionId);
+  if (shownVersionId !== props.pendingVersionId) {
+    setShownVersionId(props.pendingVersionId);
+    setDraft(initialDraft({ pending: props.pending, inForce: props.inForce, defaults: props.defaults }));
+  }
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [busy, startTransition] = useTransition();
   const toast = useToast();
@@ -41,14 +50,18 @@ export function CampaignForm(props: CampaignFormProps) {
   const state = approveState(draft, { inForce: props.inForce, pending: props.pending, minEndsOn: props.minEndsOn });
   const errors = result.ok ? {} : result.errors;
   const resumeName = props.resumes.find((resume) => resume.id === draft.resumeId)?.filename ?? "";
-  const summaryRules = {
-    roles: draft.roles,
-    autoCompanies: draft.auto,
-    askFirstCompanies: draft.ask,
-    weeklyCap: Number(draft.weeklyCap) || 0,
-    minMatch: Number(draft.minMatch) || 0,
-    endsOn: draft.endsOn,
-  };
+  // The summary is computed from exactly the rules Approve and Save send; the raw draft is only a fallback
+  // while the form is invalid (and then Approve is disabled).
+  const summaryRules = result.ok
+    ? result.rules
+    : {
+        roles: draft.roles,
+        autoCompanies: draft.auto,
+        askFirstCompanies: draft.ask,
+        weeklyCap: Number(draft.weeklyCap) || 0,
+        minMatch: Number(draft.minMatch) || 0,
+        endsOn: draft.endsOn,
+      };
 
   const run = (action: () => Promise<CampaignActionResult>, after?: () => void) =>
     startTransition(async () => {
@@ -60,8 +73,11 @@ export function CampaignForm(props: CampaignFormProps) {
         toast.show("We couldn't reach Inroad. Check your connection and try again.", "error");
       }
     });
-  const withRules = (action: (rules: CampaignRules) => Promise<CampaignActionResult>) => () => {
-    if (result.ok) run(() => action(result.rules));
+  const onSave = () => {
+    if (result.ok) run(() => saveRulesAction(result.rules));
+  };
+  const onApprove = (formData: FormData) => {
+    if (result.ok) run(() => approveRulesAction(formData));
   };
 
   return (
@@ -89,8 +105,10 @@ export function CampaignForm(props: CampaignFormProps) {
           canApprove={state.canApprove}
           canSave={state.canSave}
           busy={busy}
-          onApprove={withRules(approveRulesAction)}
-          onSave={withRules(saveRulesAction)}
+          approveVersionId={props.pendingVersionId ?? ""}
+          approveRules={result.ok ? JSON.stringify(result.rules) : ""}
+          onApprove={onApprove}
+          onSave={onSave}
           onTogglePause={() => run(() => setCampaignStatusAction(props.status === "paused" ? "active" : "paused"))}
           onRevoke={() => setRevokeOpen(true)}
         />

@@ -73,6 +73,8 @@ test("editing the approved campaign shows the banner and changes nothing until i
 
   await page.goto("/campaign");
   await expect(companyToggle(page, "Palantir")).toContainText("auto-apply");
+  // Approve posts the id of the stored pending version whose summary is on screen.
+  await expect(page.locator('form.actions input[type="hidden"][name="versionId"]')).not.toHaveValue("");
   await page.getByRole("button", { name: "Approve new rules" }).click();
   await expect(page.getByRole("note")).toHaveCount(0);
   await page.goto("/jobs");

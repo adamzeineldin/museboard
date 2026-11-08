@@ -39,9 +39,18 @@ async function packetFor(userId: string, application: Application): Promise<{ pa
   return { packet: buildApplicationPacket(user, job, resume), applyUrl: job.url };
 }
 
+/** Mark that this decision's packet went out (first release only). recordSubmission relies on it. */
+async function markReleased(userId: string, applicationId: string, now: Date): Promise<void> {
+  await db.application.updateMany({
+    where: { id: applicationId, userId, status: "prepared", packetReleasedAt: null },
+    data: { packetReleasedAt: now },
+  });
+}
+
 /**
  * Release the packet and apply URL only when the application may go out right now (brief sec. 6,
  * submit_application). Both outcomes are audited. `actor` defaults to 'inroad' (Inroad decides).
+ * A release stamps Application.packetReleasedAt, which lets the submission be recorded later.
  */
 export async function getSubmissionPacket(
   userId: string,
@@ -67,39 +76,81 @@ export async function getSubmissionPacket(
   });
   if (!decision.allowed) return { allowed: false, reason: decision.reason };
   const { packet, applyUrl } = await packetFor(userId, application);
+  await markReleased(userId, application.id, now);
   return { allowed: true, packet, applyUrl };
 }
 
-/** prepared -> submitted (idempotent when already submitted). Records what Muse or the user reported. */
+type SubmissionGate = { allowed: true; basis: "packet_released" | "release_check" } | { allowed: false; reason: string };
+
+/**
+ * May this prepared application be recorded as submitted? Yes if its packet was released for the current
+ * decision (Muse can only submit with the packet, so that submission is a true event even if the campaign
+ * was paused or edited since), or if the release check allows it right now. Never for anything else.
+ */
+async function submissionGate(userId: string, application: Application, now: Date): Promise<SubmissionGate> {
+  const refusal = statusRefusal(application);
+  if (refusal) return { allowed: false, reason: refusal };
+  if (application.packetReleasedAt) return { allowed: true, basis: "packet_released" };
+  const verdict = await decideRelease(userId, application, now);
+  return verdict.allowed ? { allowed: true, basis: "release_check" } : { allowed: false, reason: verdict.reason };
+}
+
+const asSentence = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+async function refuseRecording(userId: string, actor: Actor, application: Application, reason: string): Promise<never> {
+  await writeAudit(userId, actor, "application.record_refused", {
+    applicationId: application.id,
+    jobId: application.jobId,
+    status: application.status,
+    reason,
+  });
+  throw new ApplicationError(
+    "not_released",
+    `Inroad won't record this submission: ${asSentence(reason)} Its packet was never released, so nothing was recorded.`,
+    reason,
+  );
+}
+
+/**
+ * prepared -> submitted (idempotent when already submitted). Records what Muse or the user reported, only
+ * when submissionGate allows it; a refusal throws ApplicationError 'not_released' and is audited as
+ * 'application.record_refused'. Web and MCP share this check. `now` is the clock for the release check.
+ */
 export async function recordSubmission(
   userId: string,
   applicationId: string,
   actor: Actor,
   confirmationText?: string,
+  now: Date = new Date(),
 ): Promise<Application> {
   const parsedActor = parseActorOrThrow(actor);
   const confirmation = confirmationSchema.safeParse(confirmationText ?? undefined);
   if (!confirmation.success) throw new ApplicationError("invalid_input", confirmation.error.issues[0].message);
   const application = await loadOwnedApplication(userId, applicationId);
   if (application.status === "submitted") return application;
-  const notReady = () =>
-    new ApplicationError("invalid_state", "Only applications that are ready to submit can be marked submitted.");
-  if (application.status !== "prepared") throw notReady();
-
+  const gate = await submissionGate(userId, application, now);
+  if (!gate.allowed) return refuseRecording(userId, parsedActor, application, gate.reason);
   const text = confirmation.data ? confirmation.data : null;
+  // Expected outcomes never throw inside the transaction: the state change and its audit commit together.
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "prepared" },
       data: { status: "submitted", submittedAt: new Date(), confirmationText: text },
     });
-    if (count === 0) throw notReady();
-    return tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    if (count === 0) return null;
+    const row = await tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    await writeAudit(
+      userId,
+      parsedActor,
+      "application.submitted",
+      { applicationId: row.id, jobId: row.jobId, decidedBy: row.decidedBy, allowedBy: gate.basis, hasConfirmation: text !== null },
+      tx,
+    );
+    return row;
   });
-  await writeAudit(userId, parsedActor, "application.submitted", {
-    applicationId: updated.id,
-    jobId: updated.jobId,
-    decidedBy: updated.decidedBy,
-    hasConfirmation: text !== null,
-  });
-  return updated;
+  if (updated) return updated;
+  // Lost a race: a concurrent call already recorded it (idempotent), or the row left 'prepared'.
+  const current = await loadOwnedApplication(userId, application.id);
+  if (current.status === "submitted") return current;
+  throw new ApplicationError("invalid_state", "Only applications that are ready to submit can be marked submitted.");
 }

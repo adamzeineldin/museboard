@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeAuditEvent, initials, passToastMessage, statsModel } from "./view-model";
+import { describeAuditEvent, hiddenHistoryNote, initials, passToastMessage, statsModel } from "./view-model";
 
 const event = (action: string, payload: Record<string, unknown>, actor: "user" | "inroad" | "muse" = "inroad") => ({
   actor,
@@ -51,9 +51,14 @@ describe("statsModel and initials", () => {
   it("formats the weekly stat with a dash when there is no cap", () => {
     expect(statsModel({ weekCount: 2, weeklyCap: 5, waiting: 1, prepared: 0, submitted: 3, skipped: 0 })[0]).toEqual({
       value: "2/5",
-      label: "Applied this week",
+      label: "Weekly cap used",
     });
     expect(statsModel({ weekCount: 0, weeklyCap: null, waiting: 0, prepared: 0, submitted: 0, skipped: 0 })[0].value).toBe("0/–");
+  });
+
+  it("says how many older rows are not listed", () => {
+    expect(hiddenHistoryNote(1)).toBe("1 older submitted or skipped application isn't listed. The totals above include them.");
+    expect(hiddenHistoryNote(3)).toBe("3 older submitted or skipped applications aren't listed. The totals above include them.");
   });
 
   it("builds logo initials", () => {

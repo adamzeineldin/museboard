@@ -34,6 +34,12 @@ export function splitVersions(versions: readonly CampaignVersion[]): Omit<Campai
   };
 }
 
+/** One of the user's own campaign versions by id (any status), or null. Never reveals other users' rows. */
+export async function findOwnVersion(userId: string, versionId: string, client: DbClient = db): Promise<CampaignVersion | null> {
+  if (!versionId.trim()) return null;
+  return client.campaignVersion.findFirst({ where: { id: versionId, campaign: { userId } } });
+}
+
 export async function getCampaignState(userId: string): Promise<CampaignState> {
   const campaign = await findLiveCampaign(db, userId);
   if (!campaign) return { campaign: null, inForce: null, pending: null, rulesInForce: null };

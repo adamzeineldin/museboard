@@ -27,17 +27,27 @@ function toJsonPayload(payload: unknown): Prisma.InputJsonValue {
   return value === null ? {} : (value as Prisma.InputJsonValue);
 }
 
+/** Anything that can insert an audit row: `db`, or a transaction client. */
+export type AuditClient = Pick<Prisma.TransactionClient, "auditEvent">;
+
 /**
  * Record what happened and who did it (ground rule 6). Throws on invalid input or DB failure:
- * callers must not silently continue when the audit trail can't be written.
+ * callers must not silently continue when the audit trail can't be written. Pass the transaction client
+ * as `client` when the audit belongs to a state change, so both commit or roll back together.
  */
-export async function writeAudit(userId: string, actor: Actor, action: string, payload: unknown): Promise<void> {
+export async function writeAudit(
+  userId: string,
+  actor: Actor,
+  action: string,
+  payload: unknown,
+  client: AuditClient = db,
+): Promise<void> {
   const parsed = auditInputSchema.safeParse({ userId, actor, action });
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
     throw new Error(`Invalid audit event (${issues})`);
   }
-  await db.auditEvent.create({
+  await client.auditEvent.create({
     data: {
       userId: parsed.data.userId,
       actor: parsed.data.actor,

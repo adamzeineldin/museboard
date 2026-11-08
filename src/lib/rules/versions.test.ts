@@ -72,6 +72,13 @@ describe("pendingVersion", () => {
     expect(pendingVersion(versions)).toBeNull();
   });
 
+  it("skips superseded versions: a replaced proposal is never pending", () => {
+    const superseded = { ...v("v2", "2026-11-02T00:00:00Z"), supersededAt: new Date("2026-11-03T00:00:00Z") };
+    const versions = [v("v1", "2026-11-01T00:00:00Z", "2026-11-01T01:00:00Z"), superseded, v("v3", "2026-11-03T00:00:00Z")];
+    expect(pendingVersion(versions)?.id).toBe("v3");
+    expect(pendingVersion([versions[0], superseded])).toBeNull();
+  });
+
   it("returns null when the newest version is approved", () => {
     const versions = [v("v1", "2026-11-01T00:00:00Z", "2026-11-01T01:00:00Z")];
     expect(pendingVersion(versions)).toBeNull();

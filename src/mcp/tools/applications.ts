@@ -25,7 +25,8 @@ export const prepareApplicationTool = defineTool({
     `Runs the rule check against ${RULE_SUMMARY}.`,
     "If it passes, the application is prepared (cleared to submit) and the packet is returned.",
     "If not, the application waits for the user to approve or skip it in Inroad, and the reason is returned (for a top-choice company Inroad also drafts a referral ask, never sent).",
-    "Calling it again for the same job returns the existing application, re-checked only while it is waiting; a prepared application that the rules no longer allow comes back held, without its packet.",
+    "Calling it again for the same job returns the existing application, re-checked only while it is waiting (a pass prepares it with the campaign's resume; a new failing reason updates the reason); a prepared application that the rules no longer allow comes back held, without its packet.",
+    "A posting that has closed is refused with an error.",
   ].join(" "),
   input: z.strictObject({ jobId: idSchema("jobId") }),
   hints: { destructiveHint: false, idempotentHint: true },
@@ -74,9 +75,10 @@ export const submitApplicationTool = defineTool({
   title: "Get application packet to submit",
   museClass: "sensitive_write",
   description: [
-    "Muse class: Sensitive write. Side effect: records in Inroad's audit log that the packet was requested; nothing else changes and Inroad submits nothing.",
+    "Muse class: Sensitive write. Side effects: records in Inroad's audit log that the packet was requested, and, when the packet is returned, marks this application's packet as released,",
+    "so record_submission can record it later even if the campaign is paused or its rules are edited afterwards. Inroad submits nothing.",
     "Returns the prepared application packet (resume, answers to common fields, tailored summary, and notes on fields only the user can answer) and the job's application URL,",
-    `only if this application may go out right now: the user approved it in Inroad, or it passes ${RULE_SUMMARY}.`,
+    `only if this application may go out right now: the posting is still open, and the user approved it in Inroad or it passes ${RULE_SUMMARY}.`,
     "Otherwise it returns an error with the reason and releases nothing.",
     "Filling in and sending the employer's form happens in Muse's own browser agent, under Muse's own controls and the user's approval. After the form is sent, call record_submission.",
   ].join(" "),
@@ -102,6 +104,8 @@ export const recordSubmissionTool = defineTool({
   description: [
     "Muse class: Write. Side effect: marks a prepared application as submitted in Inroad and writes an audit entry.",
     "Call it only after the employer's application form was actually sent. Optional confirmationText: the confirmation message or number the site showed.",
+    "Inroad records it only if submit_application released this application's packet, or if it may go out right now (same check as submit_application);",
+    "otherwise it returns an error with the reason and records nothing. A packet that was released stays recordable even if the campaign is paused or edited afterwards.",
     "Recording an already submitted application again changes nothing.",
   ].join(" "),
   input: z.strictObject({
@@ -112,7 +116,7 @@ export const recordSubmissionTool = defineTool({
   output: z.object({ applicationId: z.string(), status: z.literal("submitted"), submittedAt: isoString }),
   auditArgs: (input) => ({ applicationId: input.applicationId, hasConfirmation: Boolean(input.confirmationText) }),
   async run(ctx, input) {
-    const application = await recordSubmission(ctx.userId, input.applicationId, "muse", input.confirmationText);
+    const application = await recordSubmission(ctx.userId, input.applicationId, "muse", input.confirmationText, ctx.now());
     if (application.status !== "submitted" || !application.submittedAt) {
       throw new ToolRefusal("Only applications that are ready to submit can be marked submitted.");
     }

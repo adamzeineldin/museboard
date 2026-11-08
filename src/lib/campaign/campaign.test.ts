@@ -8,8 +8,10 @@ import {
   getCampaignHistory,
   getCampaignState,
   loadRuleCampaign,
+  proposeRules,
   proposeVersion,
   setCampaignStatus,
+  STALE_VERSION_MESSAGE,
 } from "./index";
 
 const FAR_FUTURE = "2099-12-31";
@@ -90,15 +92,61 @@ describe("campaign versions", () => {
     expect(proposed.payload).toMatchObject({ before: rules, after: edited, replacedPending: false });
   });
 
-  it("a second proposal replaces the rules of the existing pending version", async () => {
+  it("a second proposal creates a new version and supersedes the earlier pending one, whose rules never change", async () => {
     const { user, rules } = await setup();
     const v1 = await proposeVersion(user.id, rules, "web");
     await approveVersion(user.id, v1.id, "web");
     const first = await proposeVersion(user.id, { ...rules, weeklyCap: 3 }, "web");
     const second = await proposeVersion(user.id, { ...rules, weeklyCap: 7 }, "muse");
-    expect(second.id).toBe(first.id);
-    expect(await db.campaignVersion.count()).toBe(2);
-    expect((await getCampaignState(user.id)).pending?.rules).toMatchObject({ weeklyCap: 7 });
+    expect(second.id).not.toBe(first.id);
+    expect(await db.campaignVersion.count()).toBe(3);
+    const replaced = await db.campaignVersion.findUniqueOrThrow({ where: { id: first.id } });
+    expect(replaced.rules).toMatchObject({ weeklyCap: 3 });
+    expect(replaced.supersededAt).toBeInstanceOf(Date);
+    expect(replaced.approvedAt).toBeNull();
+    expect((await getCampaignState(user.id)).pending?.id).toBe(second.id);
+    const proposed = await db.auditEvent.findFirstOrThrow({ where: { userId: user.id, actor: "muse", action: "campaign.proposed" } });
+    expect(proposed.payload).toMatchObject({ versionId: second.id, supersededVersionId: first.id, replacedPending: true });
+  });
+
+  it("refuses to approve a version a newer proposal replaced (stale_version) and approves nothing", async () => {
+    const { user, rules } = await setup();
+    const v1 = await proposeVersion(user.id, rules, "web");
+    await approveVersion(user.id, v1.id, "web");
+    const shown = await proposeVersion(user.id, { ...rules, weeklyCap: 3 }, "muse");
+    const latest = await proposeVersion(user.id, { ...rules, weeklyCap: 9 }, "web");
+    const stale = approveVersion(user.id, shown.id, "muse");
+    await expect(stale).rejects.toMatchObject({ code: "stale_version", message: STALE_VERSION_MESSAGE });
+    const state = await getCampaignState(user.id);
+    expect(state.inForce?.id).toBe(v1.id);
+    expect(state.pending?.id).toBe(latest.id);
+    expect(await db.campaignVersion.count({ where: { approvedAt: { not: null } } })).toBe(1);
+    expect((await approveVersion(user.id, latest.id, "web")).rules).toMatchObject({ weeklyCap: 9 });
+    await expect(approveVersion(user.id, shown.id, "web")).rejects.toMatchObject({ code: "stale_version" });
+  });
+
+  it("proposing the pending rules again returns that version unchanged, with no new audit entry", async () => {
+    const { user, rules } = await setup();
+    const first = await proposeRules(user.id, rules, "web");
+    expect(first.outcome).toBe("created");
+    const again = await proposeRules(user.id, { ...rules, autoCompanies: ["datadog", "STRIPE"] }, "muse");
+    expect(again).toMatchObject({ outcome: "unchanged_pending", supersededVersionId: null });
+    expect(again.version.id).toBe(first.version.id);
+    expect(again.version.supersededAt).toBeNull();
+    expect(await db.campaignVersion.count()).toBe(1);
+    expect(await auditActions(user.id)).toEqual(["campaign.proposed"]);
+  });
+
+  it("proposing the rules in force with nothing pending is a no-op returning the version in force", async () => {
+    const { user, rules } = await setup();
+    const v1 = await proposeVersion(user.id, rules, "web");
+    await approveVersion(user.id, v1.id, "web");
+    const result = await proposeRules(user.id, rules, "muse");
+    expect(result.outcome).toBe("unchanged_in_force");
+    expect(result.version.id).toBe(v1.id);
+    expect(await db.campaignVersion.count()).toBe(1);
+    expect((await getCampaignState(user.id)).pending).toBeNull();
+    expect(await auditActions(user.id)).toEqual(["campaign.proposed", "campaign.approved"]);
   });
 
   it("approving the pending version swaps it in and keeps the campaign status", async () => {
@@ -194,12 +242,15 @@ describe("campaign versions", () => {
     const v1 = await proposeVersion(user.id, rules, "web");
     await approveVersion(user.id, v1.id, "web");
     const v2 = await proposeVersion(user.id, { ...rules, weeklyCap: 3 }, "muse");
+    const v3 = await proposeVersion(user.id, { ...rules, weeklyCap: 4 }, "web");
     const history = await getCampaignHistory(user.id);
     expect(history.map((h) => [h.id, h.number, h.state, h.proposedBy])).toEqual([
-      [v2.id, 2, "pending", "muse"],
+      [v3.id, 3, "pending", "user"],
+      [v2.id, 2, "replaced", "muse"],
       [v1.id, 1, "in_force", "user"],
     ]);
-    expect(history[1]).toMatchObject({ approvedVia: "web" });
+    expect(history[2]).toMatchObject({ approvedVia: "web" });
+    expect(history[1]).toMatchObject({ approvedAt: null, approvedVia: null });
   });
 });
 

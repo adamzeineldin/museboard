@@ -69,7 +69,27 @@ describe("getActivity", () => {
       items: [],
       stats: { weekCount: 0, weeklyCap: null, waiting: 0, prepared: 0, submitted: 0, skipped: 0 },
       campaignActive: false,
+      hiddenHistory: 0,
     });
+  });
+
+  it("past the history limit: keeps every open row, counts stats over all rows and says how many are hidden", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    const { prepareApplication, recordSubmission, skipWaiting } = await import("./index");
+    for (const key of ["stripe", "datadog"]) {
+      const app = await prepareApplication(world.user.id, world.jobs[key].id, "user", NOW);
+      await recordSubmission(world.user.id, app.id, "user", undefined, NOW);
+    }
+    const skipped = await prepareApplication(world.user.id, world.jobs.palantir.id, "user", NOW);
+    await skipWaiting(world.user.id, skipped.id);
+    await prepareApplication(world.user.id, world.jobs.meta.id, "user", NOW);
+    await prepareApplication(world.user.id, world.jobs.cloudflare.id, "user", NOW);
+
+    const data = await getActivity(world.user.id, "America/New_York", NOW, { historyLimit: 1 });
+    expect(data.items.map((item) => item.status)).toEqual(["waiting", "prepared", "skipped"]);
+    expect(data.stats).toMatchObject({ waiting: 1, prepared: 1, submitted: 2, skipped: 1 });
+    expect(data.hiddenHistory).toBe(2);
   });
 
   it("orders waiting, prepared, submitted, skipped, with stats and per-row audit trails", async () => {

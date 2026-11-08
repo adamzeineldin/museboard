@@ -33,6 +33,31 @@ describe("release check (web and Muse parity)", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
+  it("refuses to release or approve applications whose posting has closed", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    await runWeeklyPass(world.user.id, "inroad", NOW);
+    const [stripe, meta] = await Promise.all([appFor(world, "stripe"), appFor(world, "meta")]);
+    await db.job.updateMany({ where: { id: { in: [world.jobs.stripe.id, world.jobs.meta.id] } }, data: { closedAt: NOW } });
+
+    const closed = { allowed: false, reason: "This posting has closed." };
+    expect(await getSubmissionPacket(world.user.id, stripe.id, NOW, "muse")).toEqual(closed);
+    expect(await checkRelease(world.user.id, stripe.id, NOW)).toEqual(closed);
+    expect((await getReleaseVerdicts(world.user.id, NOW)).get(stripe.id)).toEqual(closed);
+    await expect(approveWaiting(world.user.id, meta.id, NOW)).rejects.toThrow("This posting has closed.");
+    expect((await appFor(world, "meta")).status).toBe("waiting");
+  });
+
+  it("a user-approved application is not released once its posting closes", async () => {
+    const world = await createWorld();
+    await approveRules(world);
+    await runWeeklyPass(world.user.id, "inroad", NOW);
+    const meta = await appFor(world, "meta");
+    await approveWaiting(world.user.id, meta.id, NOW);
+    await db.job.update({ where: { id: world.jobs.meta.id }, data: { closedAt: NOW } });
+    expect(await getSubmissionPacket(world.user.id, meta.id, NOW, "muse")).toEqual({ allowed: false, reason: "This posting has closed." });
+  });
+
   it("over cap after a user approval: one campaign-prepared row is held with 'Weekly limit reached'", async () => {
     const { world, stripe, datadog, cloudflare } = await overCapWorld();
     const verdicts = await getReleaseVerdicts(world.user.id, NOW);

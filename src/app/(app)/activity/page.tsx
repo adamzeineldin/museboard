@@ -17,7 +17,7 @@ export default async function ActivityPage() {
           <p className="muted">Every application Inroad prepared, and why it went out or came back to you.</p>
         </div>
       </div>
-      <ActivityView rows={toRowModels(data.items, user.timezone)} stats={data.stats} campaignActive={data.campaignActive} />
+      <ActivityView rows={toRowModels(data.items, user.timezone)} stats={data.stats} campaignActive={data.campaignActive} hiddenHistory={data.hiddenHistory} />
     </>
   );
 }

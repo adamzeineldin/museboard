@@ -58,4 +58,25 @@ describe("Connect Muse actions", () => {
     expect(await revokeConnectorTokenAction(IDLE_CONNECTOR_STATE, form({ tokenId: record.id }))).toMatchObject({ status: "success" });
     expect((await db.connectorToken.findUniqueOrThrow({ where: { id: record.id } })).revokedAt).not.toBeNull();
   });
+
+  it("hides unexpected failures behind a friendly message and logs them", async () => {
+    const user = await createTestUser();
+    getSessionUserId.mockResolvedValue(user.id);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const create = vi.spyOn(db.connectorToken, "create").mockRejectedValueOnce(new Error("disk full"));
+    expect(await createConnectorTokenAction(IDLE_CONNECTOR_STATE, form({ name: "Muse", scope: "read" }))).toMatchObject({
+      status: "error",
+      message: "We couldn't create that connection. Try again in a moment.",
+    });
+    create.mockRestore();
+    const update = vi.spyOn(db.connectorToken, "findFirst").mockRejectedValueOnce("boom");
+    expect(await revokeConnectorTokenAction(IDLE_CONNECTOR_STATE, form({ tokenId: "tok_1" }))).toMatchObject({
+      status: "error",
+      message: "We couldn't revoke that connection. Try again in a moment.",
+    });
+    update.mockRestore();
+    expect(logged).toHaveBeenCalledWith("[settings] connector action failed", expect.objectContaining({ action: "create", error: "disk full" }));
+    expect(logged).toHaveBeenCalledWith("[settings] connector action failed", expect.objectContaining({ action: "revoke", error: "boom" }));
+    logged.mockRestore();
+  });
 });

@@ -258,9 +258,10 @@ describe("recordSubmission", () => {
     const world = await createWorld();
     await approveRules(world);
     const held = await prepareApplication(world.user.id, world.jobs.meta.id, "muse", NOW);
-    await expect(recordSubmission(world.user.id, held.id, "muse")).rejects.toThrow(
-      "Only applications that are ready to submit can be marked submitted.",
-    );
+    await expect(recordSubmission(world.user.id, held.id, "muse")).rejects.toMatchObject({
+      code: "not_released",
+      reason: "Waiting on your approval: Top choice: referral first",
+    });
     const app = await prepareApplication(world.user.id, world.jobs.stripe.id, "muse", NOW);
     await expect(recordSubmission(world.user.id, app.id, "muse", "x".repeat(2001))).rejects.toThrow(
       "Keep the confirmation under 2000 characters.",

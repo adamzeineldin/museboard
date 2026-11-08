@@ -52,6 +52,16 @@ describe("ingestRun", () => {
     expect(companies[0]).toMatchObject({ ats: "greenhouse", atsConfig: { board: "stripe" } });
   });
 
+  it("reuses a company a user created with different casing instead of duplicating it", async () => {
+    const id = await seedCompany(" stripe ", null, null);
+    await ingestRun(db, rawRun([okCompany([rawJob("1")])]), T1);
+
+    const companies = await db.company.findMany();
+    expect(companies).toHaveLength(1);
+    expect(companies[0]).toMatchObject({ id, name: " stripe ", ats: null });
+    expect((await db.job.findUniqueOrThrow({ where: { id: "greenhouse:stripe:1" } })).companyId).toBe(id);
+  });
+
   it("updates fields of an existing job but keeps firstSeenAt", async () => {
     await ingestRun(db, rawRun([okCompany([rawJob("1")])]), T1);
     const changed = rawJob("1", {

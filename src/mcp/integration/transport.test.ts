@@ -110,6 +110,9 @@ describe("/mcp tool listing by scope", () => {
     }
     expect(byName.get("approve_campaign")?.description).toMatch(/show the user the summary returned by propose_campaign.*explicit yes/);
     expect(byName.get("draft_outreach")?.description).toMatch(/Inroad never sends messages/);
+    // The release stamp is a lasting side effect (record_submission relies on it), so it must be disclosed.
+    expect(byName.get("submit_application")?.description).toMatch(/marks this application's packet as released/);
+    expect(byName.get("submit_application")?.description).not.toMatch(/nothing else changes/);
     expect(byName.get("find_roles")?.annotations).toMatchObject({ idempotentHint: true, destructiveHint: false });
     for (const tool of tools) expect(tool.description).not.toMatch(/(skip|bypass|ignore)\w* (the |its |any |Muse's )?(permission|approval|prompt|confirmation)/i);
   });

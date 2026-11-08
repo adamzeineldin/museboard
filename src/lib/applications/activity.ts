@@ -49,11 +49,20 @@ export interface ActivityData {
   stats: ActivityStats;
   /** True when an approved campaign is active (the weekly pass can run). */
   campaignActive: boolean;
+  /** Submitted or skipped applications past the history limit, not in `items` (still counted in `stats`). */
+  hiddenHistory: number;
+}
+
+export interface ActivityOptions {
+  /** Max submitted/skipped rows listed. Waiting and prepared rows are always listed (they need the user). */
+  historyLimit?: number;
 }
 
 const STATUS_ORDER: Record<ApplicationStatus, number> = { waiting: 0, prepared: 1, submitted: 2, skipped: 3 };
 const AUDIT_SCAN_LIMIT = 2000;
-const APPLICATION_LIMIT = 500;
+const HISTORY_LIMIT = 500;
+const OPEN_STATUSES: ApplicationStatus[] = ["waiting", "prepared"];
+const HISTORY_STATUSES: ApplicationStatus[] = ["submitted", "skipped"];
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -80,14 +89,35 @@ export function sortActivity(items: readonly ActivityItem[]): ActivityItem[] {
   );
 }
 
-export async function getActivity(userId: string, timeZone: string, now: Date = new Date()): Promise<ActivityData> {
-  const [applications, events, count, state, verdicts] = await Promise.all([
+/** Counts per status over ALL of the user's applications (not just the listed page). */
+async function statusCounts(userId: string): Promise<Record<ApplicationStatus, number>> {
+  const groups = await db.application.groupBy({ by: ["status"], where: { userId }, _count: { _all: true } });
+  const counts: Record<ApplicationStatus, number> = { waiting: 0, prepared: 0, submitted: 0, skipped: 0 };
+  for (const group of groups) {
+    const status = applicationStatusSchema.safeParse(group.status);
+    if (status.success) counts[status.data] += group._count._all;
+  }
+  return counts;
+}
+
+const ACTIVITY_INCLUDE = { job: { include: { company: true } }, resume: { select: { filename: true } } } as const;
+
+export async function getActivity(
+  userId: string,
+  timeZone: string,
+  now: Date = new Date(),
+  options: ActivityOptions = {},
+): Promise<ActivityData> {
+  const historyLimit = Math.max(0, Math.trunc(options.historyLimit ?? HISTORY_LIMIT));
+  const [open, history, counts, events, count, state, verdicts] = await Promise.all([
+    db.application.findMany({ where: { userId, status: { in: OPEN_STATUSES } }, include: ACTIVITY_INCLUDE, orderBy: { createdAt: "desc" } }),
     db.application.findMany({
-      where: { userId },
-      include: { job: { include: { company: true } }, resume: { select: { filename: true } } },
+      where: { userId, status: { in: HISTORY_STATUSES } },
+      include: ACTIVITY_INCLUDE,
       orderBy: { createdAt: "desc" },
-      take: APPLICATION_LIMIT,
+      take: historyLimit,
     }),
+    statusCounts(userId),
     db.auditEvent.findMany({
       where: { userId, action: { startsWith: "application." } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -98,7 +128,7 @@ export async function getActivity(userId: string, timeZone: string, now: Date = 
     getReleaseVerdicts(userId, now),
   ]);
   const eventsById = groupEvents(events);
-  const items = applications.map((app): ActivityItem => ({
+  const items = [...open, ...history].map((app): ActivityItem => ({
     id: app.id,
     status: applicationStatusSchema.catch("waiting").parse(app.status),
     decidedBy: app.decidedBy,
@@ -113,17 +143,17 @@ export async function getActivity(userId: string, timeZone: string, now: Date = 
     release: verdicts.get(app.id) ?? null,
     events: eventsById.get(app.id) ?? [],
   }));
-  const countOf = (status: ApplicationStatus) => items.filter((item) => item.status === status).length;
   return {
     items: sortActivity(items),
     stats: {
       weekCount: count,
       weeklyCap: state.rulesInForce?.weeklyCap ?? null,
-      waiting: countOf("waiting"),
-      prepared: countOf("prepared"),
-      submitted: countOf("submitted"),
-      skipped: countOf("skipped"),
+      waiting: counts.waiting,
+      prepared: counts.prepared,
+      submitted: counts.submitted,
+      skipped: counts.skipped,
     },
     campaignActive: state.campaign?.status === "active" && state.rulesInForce !== null,
+    hiddenHistory: Math.max(0, counts.submitted + counts.skipped - history.length),
   };
 }

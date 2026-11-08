@@ -2,6 +2,7 @@ import { Chip, ErrorState, Panel } from "@/components/ui";
 import { ContactForm } from "./ContactForm";
 import { CopyButton } from "./CopyButton";
 import { DeleteContactButton } from "./DeleteContactButton";
+import { DraftHeading } from "./DraftHeading";
 import { DraftHistory } from "./DraftHistory";
 import { DraftOptions } from "./DraftOptions";
 import type { SelectedView } from "./load";
@@ -19,9 +20,7 @@ export function DraftPanel({ selected, timeZone }: { selected: SelectedView; tim
   return (
     <Panel aria-labelledby="draft-heading">
       <div className="head">
-        <h2 id="draft-heading" className="label">
-          {label}
-        </h2>
+        <DraftHeading id="draft-heading" contactId={contact.id} label={label} />
         {selected.draftText ? <CopyButton targetId={DRAFT_TEXT_ID} label={`Copy draft to ${contact.name}`} /> : null}
       </div>
 

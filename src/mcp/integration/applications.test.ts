@@ -143,7 +143,34 @@ describe("record_submission", () => {
     const waiting = await prepare(JOB_IDS.meta);
     expect(await call(client, "record_submission", { applicationId: waiting })).toMatchObject({
       isError: true,
-      text: "Only applications that are ready to submit can be marked submitted.",
+      text: `Inroad won't record this submission: Waiting on your approval: ${RULE_REASONS.topChoice}. Its packet was never released, so nothing was recorded.`,
+    });
+  });
+
+  it("refuses a held application whose packet was never released, and audits the refusal", async () => {
+    const id = await prepare(JOB_IDS.stripe);
+    await setCampaignStatus(world.user.id, "paused");
+    const result = await call(client, "record_submission", { applicationId: id, confirmationText: "Ref 1" });
+    expect(result).toMatchObject({ isError: true, text: expect.stringContaining(`Inroad won't record this submission: ${RULE_REASONS.paused}.`) });
+    expect(await db.application.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "prepared", submittedAt: null });
+    expect(await db.auditEvent.findFirst({ where: { action: "application.record_refused" } })).toMatchObject({
+      actor: "muse",
+      payload: { applicationId: id, reason: RULE_REASONS.paused },
+    });
+    expect(await db.auditEvent.count({ where: { action: "application.submitted" } })).toBe(0);
+  });
+
+  it("records a submission after submit_application released the packet, even if the campaign is paused afterwards", async () => {
+    const id = await prepare(JOB_IDS.stripe);
+    expect((await call(client, "submit_application", { applicationId: id })).isError).toBe(false);
+    await setCampaignStatus(world.user.id, "paused");
+    expect((await call(client, "submit_application", { applicationId: id })).isError).toBe(true);
+
+    const result = await call(client, "record_submission", { applicationId: id });
+    expect(result).toMatchObject({ isError: false, data: { applicationId: id, status: "submitted" } });
+    expect(await db.auditEvent.findFirst({ where: { action: "application.submitted" } })).toMatchObject({
+      actor: "muse",
+      payload: { applicationId: id, allowedBy: "packet_released" },
     });
   });
 });

@@ -187,15 +187,17 @@ model Campaign {
   @@index([userId, status])
 }
 
-// The newest version with approvedAt set is the one in force.
+// The newest version with approvedAt set is the one in force. Rules are immutable once created: every
+// proposal is a new version, and the earlier unapproved one gets supersededAt (it can never be approved).
 model CampaignVersion {
-  id          String    @id @default(cuid())
-  campaignId  String
-  rules       Json
-  approvedAt  DateTime?
-  approvedVia String? // 'web' | 'muse'
-  approvedBy  String? // userId
-  createdAt   DateTime  @default(now())
+  id           String    @id @default(cuid())
+  campaignId   String
+  rules        Json
+  approvedAt   DateTime?
+  approvedVia  String? // 'web' | 'muse'
+  approvedBy   String? // userId
+  supersededAt DateTime?
+  createdAt    DateTime  @default(now())
 
   campaign     Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   applications Application[]
@@ -216,6 +218,8 @@ model Application {
   checkResult       Json?
   confirmationText  String?
   decidedAt         DateTime?
+  // Set when getSubmissionPacket released the packet for the current decision (gates recordSubmission).
+  packetReleasedAt  DateTime?
   submittedAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

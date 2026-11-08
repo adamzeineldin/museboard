@@ -18,10 +18,20 @@ export async function loadOwnedApplication(userId: string, applicationId: unknow
 const notWaiting = (verb: string) =>
   new ApplicationError("invalid_state", `Only applications waiting on you can be ${verb}.`);
 
+/** After a lost race (count 0): the row as it is now, if it already reached `status`, else the refusal. */
+async function settledOrThrow(userId: string, applicationId: string, isSettled: (row: Application) => boolean, verb: string): Promise<Application> {
+  const current = await loadOwnedApplication(userId, applicationId);
+  if (isSettled(current)) return current;
+  throw notWaiting(verb);
+}
+
+const isUserApproved = (row: Application): boolean => row.status === "prepared" && row.decidedBy === "user";
+const isSkipped = (row: Application): boolean => row.status === "skipped";
+
 /** Waiting -> prepared, decided by the user. Builds the packet so it is ready to submit. */
 export async function approveWaiting(userId: string, applicationId: string, now: Date = new Date()): Promise<Application> {
   const application = await loadOwnedApplication(userId, applicationId);
-  if (application.status === "prepared" && application.decidedBy === "user") return application;
+  if (isUserApproved(application)) return application;
   if (application.status !== "waiting") throw notWaiting("approved");
 
   const [user, job, resume] = await Promise.all([
@@ -29,6 +39,8 @@ export async function approveWaiting(userId: string, applicationId: string, now:
     loadJobOrThrow(db, application.jobId),
     db.resume.findUnique({ where: { id: application.resumeId } }),
   ]);
+  if (job.closedAt) throw new ApplicationError("closed", APPLICATION_REASONS.postingClosed);
+  // Expected outcomes never throw inside the transaction: the state change and its audit commit together.
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "waiting" },
@@ -37,40 +49,45 @@ export async function approveWaiting(userId: string, applicationId: string, now:
         decidedBy: "user",
         reason: APPLICATION_REASONS.approvedByYou,
         decidedAt: now,
+        packetReleasedAt: null,
         packet: toJson(buildApplicationPacket(user, job, resume)),
       },
     });
-    if (count === 0) throw notWaiting("approved");
-    return tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    if (count === 0) return null;
+    const row = await tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    await writeAudit(
+      userId,
+      "user",
+      "application.approved",
+      { applicationId: row.id, jobId: row.jobId, previousReason: application.reason, reason: row.reason },
+      tx,
+    );
+    return row;
   });
-  await writeAudit(userId, "user", "application.approved", {
-    applicationId: updated.id,
-    jobId: updated.jobId,
-    previousReason: application.reason,
-    reason: updated.reason,
-  });
-  return updated;
+  return updated ?? settledOrThrow(userId, application.id, isUserApproved, "approved");
 }
 
 /** Waiting -> skipped, decided by the user. */
 export async function skipWaiting(userId: string, applicationId: string): Promise<Application> {
   const application = await loadOwnedApplication(userId, applicationId);
-  if (application.status === "skipped") return application;
+  if (isSkipped(application)) return application;
   if (application.status !== "waiting") throw notWaiting("skipped");
 
   const updated = await db.$transaction(async (tx) => {
     const { count } = await tx.application.updateMany({
       where: { id: application.id, userId, status: "waiting" },
-      data: { status: "skipped", decidedBy: "user", reason: APPLICATION_REASONS.skippedByYou, decidedAt: new Date() },
+      data: { status: "skipped", decidedBy: "user", reason: APPLICATION_REASONS.skippedByYou, decidedAt: new Date(), packetReleasedAt: null },
     });
-    if (count === 0) throw notWaiting("skipped");
-    return tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    if (count === 0) return null;
+    const row = await tx.application.findUniqueOrThrow({ where: { id: application.id } });
+    await writeAudit(
+      userId,
+      "user",
+      "application.skipped",
+      { applicationId: row.id, jobId: row.jobId, previousReason: application.reason, reason: row.reason },
+      tx,
+    );
+    return row;
   });
-  await writeAudit(userId, "user", "application.skipped", {
-    applicationId: updated.id,
-    jobId: updated.jobId,
-    previousReason: application.reason,
-    reason: updated.reason,
-  });
-  return updated;
+  return updated ?? settledOrThrow(userId, application.id, isSkipped, "skipped");
 }

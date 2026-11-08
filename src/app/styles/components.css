@@ -171,7 +171,9 @@
   .toast.error a{color:var(--surface)}
   .toast-close{background:transparent;border:0;color:inherit;min-width:24px;min-height:24px;padding:0 4px}
   .toast.error{background:var(--hold);color:var(--surface)}
-  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:.88rem;font-weight:600;z-index:20}
+  /* width:max-content + max-width: without an explicit width, left:50% caps the shrink-to-fit width at half the
+     viewport and long messages wrap into a disc on phones. A 20px radius is a pill on one line, a card on several. */
+  .toast{position:fixed;left:50%;transform:translateX(-50%);box-sizing:border-box;width:max-content;max-width:min(560px,calc(100vw - 32px));bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:20px;font-size:.88rem;font-weight:600;z-index:20}
 
   /* Sign-in and onboarding */
   .auth{min-height:100vh;display:grid;place-items:center;padding:24px 16px}

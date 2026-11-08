@@ -17,8 +17,22 @@ export function isProtectedPath(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((prefix) => matchesPrefix(pathname, prefix));
 }
 
-/** Only allow same-site relative paths as post-sign-in destinations. */
+// Control characters (browsers strip tab/CR/LF, so "/\t/evil" becomes "//evil") and backslashes (read as "/").
+const UNSAFE_PATH_CHARS = /[\u0000-\u001f\u007f\\]/;
+const PROBE_ORIGIN = "http://inroad.invalid";
+
+/**
+ * Only allow same-site relative paths as post-sign-in destinations. The path is resolved the way a browser
+ * would and kept only if it stays on this origin; the result is that resolved path, query and hash.
+ */
 export function safeCallbackPath(value: string | null | undefined, fallback = "/jobs"): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return fallback;
-  return value;
+  if (!value || !value.startsWith("/") || value.startsWith("//") || UNSAFE_PATH_CHARS.test(value)) return fallback;
+  let resolved: URL;
+  try {
+    resolved = new URL(value, PROBE_ORIGIN);
+  } catch {
+    return fallback;
+  }
+  if (resolved.origin !== PROBE_ORIGIN) return fallback;
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
 }

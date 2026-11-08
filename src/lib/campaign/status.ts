@@ -33,12 +33,8 @@ export async function setCampaignStatus(userId: string, status: SettableCampaign
     const check = checkStatusTransition(current, status, Boolean(inForce));
     if (!check.ok) throw new CampaignError("invalid_transition", check.reason);
     const updated = await tx.campaign.update({ where: { id: campaign.id }, data: { status } });
+    await writeAudit(userId, "user", AUDIT_ACTION[status], { campaignId: updated.id, from: campaign.status, to: status }, tx);
     return { campaign: updated, from: campaign.status };
-  });
-  await writeAudit(userId, "user", AUDIT_ACTION[status], {
-    campaignId: outcome.campaign.id,
-    from: outcome.from,
-    to: status,
   });
   return outcome.campaign;
 }

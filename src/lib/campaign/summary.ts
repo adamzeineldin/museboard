@@ -1,4 +1,4 @@
-import { formatShortDate } from "@/components/shell/format";
+import { formatLongDate } from "@/components/shell/format";
 import { JOB_TYPES, type CampaignRules, type JobType } from "@/lib/types";
 
 // Pure: the plain-English "What you're approving" sentences (prototype docs/reference/inroad.html).
@@ -59,7 +59,8 @@ export function summarizeRuleParts(rules: SummaryRules, ctx: SummaryContext): Su
       plain("."),
     ],
     [plain("Use "), strong(resumeName), plain(", only for roles at "), strong(`${rules.minMatch}%+`), plain(" match.")],
-    [plain("At most "), strong(weeklyCapText(rules.weeklyCap)), plain(", until "), strong(formatShortDate(rules.endsOn)), plain(".")],
+    // The year is always shown: "Dec 15" alone reads the same for a five-week and a five-year campaign.
+    [plain("At most "), strong(weeklyCapText(rules.weeklyCap)), plain(", until "), strong(formatLongDate(rules.endsOn)), plain(".")],
     askFirstSentence(rules.askFirstCompanies),
     [plain("Anything else, or any change to these rules, needs a new yes from me.")],
   ];

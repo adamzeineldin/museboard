@@ -1,11 +1,10 @@
 import "server-only";
+import { normalizeCompanyName as normalize } from "@/lib/company-name";
 import { db } from "@/lib/db";
 
 // Resolve company names typed by the user (manual entry or CSV) to Company ids.
 // Matching is case-insensitive. Unknown companies are created with ats = null, which means
 // "no public job feed": the worker never scrapes them. Existing companies are never modified.
-
-const normalize = (name: string): string => name.trim().replace(/\s+/g, " ").toLowerCase();
 
 /** Map of normalized name -> company id for every name given, creating missing companies. */
 export async function resolveCompanyIds(names: readonly string[]): Promise<Map<string, string>> {

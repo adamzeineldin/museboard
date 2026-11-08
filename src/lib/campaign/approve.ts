@@ -4,7 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { parseCampaignRules, type ApprovedVia, type CampaignRules } from "@/lib/types";
 import { actorForVia, LIVE_STATUSES, type DbClient } from "./client";
-import { CampaignError } from "./errors";
+import { CampaignError, STALE_VERSION_MESSAGE } from "./errors";
 import { listVersions, splitVersions } from "./state";
 import { assertEndsOnNotPast, assertResumeOwned, loadUserOrThrow, parseViaOrThrow } from "./validate";
 
@@ -30,10 +30,10 @@ async function writeApproval(
   if (target.approvedAt) throw new CampaignError("already_approved", "That version is already approved.");
   if (!(LIVE_STATUSES as readonly string[]).includes(target.campaign.status)) throw notFound();
 
+  // Only the current pending version can be approved: a version a newer proposal replaced (supersededAt) is
+  // stale, because the summary the user said yes to is no longer what would go into force.
   const { inForce, pending, rulesInForce } = splitVersions(await listVersions(tx, target.campaignId));
-  if (pending?.id !== target.id) {
-    throw new CampaignError("invalid_transition", "A newer version replaced this one. Review the latest rules.");
-  }
+  if (target.supersededAt || pending?.id !== target.id) throw new CampaignError("stale_version", STALE_VERSION_MESSAGE);
   const after = parseCampaignRules(target.rules);
   if (!after) throw new CampaignError("invalid_rules", "That version's rules aren't valid. Edit and save them again.");
   assertEndsOnNotPast(after.endsOn, timeZone, now, "This version's end date has passed. Pick a new end date first.");
@@ -51,7 +51,11 @@ async function writeApproval(
   return { version, before: rulesInForce, after, firstApproval };
 }
 
-/** Approve the pending version of the user's own campaign. The first approval activates the campaign. */
+/**
+ * Approve exactly `versionId`, which must be the current pending version of the user's own campaign
+ * (else CampaignError 'stale_version'). Version rules never change after creation, so what the caller
+ * showed for this id is what goes into force. The first approval activates the campaign.
+ */
 export async function approveVersion(
   userId: string,
   versionId: string,
@@ -61,14 +65,24 @@ export async function approveVersion(
   const parsedVia = parseViaOrThrow(via);
   if (typeof versionId !== "string" || !versionId.trim()) throw notFound();
   const user = await loadUserOrThrow(db, userId);
-  const outcome = await db.$transaction((tx) => writeApproval(tx, userId, versionId, parsedVia, user.timezone, now));
-  await writeAudit(userId, actorForVia(parsedVia), "campaign.approved", {
-    campaignId: outcome.version.campaignId,
-    versionId: outcome.version.id,
-    via: parsedVia,
-    firstApproval: outcome.firstApproval,
-    before: outcome.before,
-    after: outcome.after,
+  // The approval and its consent record commit (or roll back) together.
+  const outcome = await db.$transaction(async (tx) => {
+    const approval = await writeApproval(tx, userId, versionId, parsedVia, user.timezone, now);
+    await writeAudit(
+      userId,
+      actorForVia(parsedVia),
+      "campaign.approved",
+      {
+        campaignId: approval.version.campaignId,
+        versionId: approval.version.id,
+        via: parsedVia,
+        firstApproval: approval.firstApproval,
+        before: approval.before,
+        after: approval.after,
+      },
+      tx,
+    );
+    return approval;
   });
   return outcome.version;
 }

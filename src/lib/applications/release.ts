@@ -27,8 +27,10 @@ export function statusRefusal(application: Pick<Application, "status" | "reason"
 export async function releaseVerdict(context: EvalContext, application: Application, now: Date): Promise<ReleaseVerdict> {
   const refusal = statusRefusal(application);
   if (refusal) return { allowed: false, reason: refusal };
-  if (application.decidedBy === "user") return { allowed: true, reason: APPLICATION_REASONS.approvedByYou };
   const job = await loadJobOrThrow(db, application.jobId);
+  // A posting the ingest closed is gone: nothing goes out for it, even with the user's approval.
+  if (job.closedAt) return { allowed: false, reason: APPLICATION_REASONS.postingClosed };
+  if (application.decidedBy === "user") return { allowed: true, reason: APPLICATION_REASONS.approvedByYou };
   const { result } = await runCheck(db, {
     userId: context.user.id,
     job,

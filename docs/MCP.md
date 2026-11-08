@@ -74,23 +74,28 @@ its side effects.
 | `find_warm_path` | Read | `{ company: string }` | `{ company, contacts: [{ contactId, name, role, relationship, source }] }` warmest first | none | read-only, idempotent |
 | `get_campaign` | Read | `{}` | `{ status: "active"\|"paused"\|"none", inForce, pending, defaultResume: { resumeId, filename } \| null }`; each version is `{ versionId, createdAt, approvedAt, approvedVia, rules, summary: string[] }` | none | read-only, idempotent |
 | `draft_outreach` | Write | `{ contactId, jobId?, kind: "coffee_chat"\|"referral_ask" }` | `{ outreachId, kind, status: "draft", draft, packet, note }` | saves an Outreach draft. **Inroad never sends messages; the user sends them.** | idempotent: no |
-| `propose_campaign` | Write | `{ rules: { roles, autoCompanies, askFirstCompanies, resumeId, weeklyCap 1-20, minMatch 50-100, endsOn "YYYY-MM-DD" } }` | `{ versionId, approved: false, summary: string[], inForceVersionId, message }` | saves a pending, unapproved version (replaces an earlier pending one). Nothing changes until approved. | idempotent |
-| `approve_campaign` | **Sensitive write** | `{ versionId }` | `{ versionId, approvedAt, approvedVia: "muse", campaignStatus, summary }` | approves the version (`approvedVia: 'muse'`); it becomes the rules in force, and a first approval activates the campaign | destructive |
-| `prepare_application` | Write | `{ jobId }` | `{ applicationId, jobId, status, decidedBy, ok, reason, topChoice, packet \| null }` | creates the Application (`prepared` if the rule check passes, otherwise `waiting` with the reason) and its audit entry; a top-choice company also gets a referral-ask draft | idempotent |
-| `submit_application` | **Sensitive write** | `{ applicationId }` | `{ applicationId, applyUrl, packet, nextStep }` | none besides the audit entry (`application.packet_requested`). Inroad submits nothing. | destructive, idempotent |
-| `record_submission` | Write | `{ applicationId, confirmationText?: string ≤ 2000 }` | `{ applicationId, status: "submitted", submittedAt }` | marks it `submitted` and writes `application.submitted` | idempotent |
+| `propose_campaign` | Write | `{ rules: { roles, autoCompanies, askFirstCompanies, resumeId, weeklyCap 1-20, minMatch 50-100, endsOn "YYYY-MM-DD" } }` | `{ versionId, approved, changed, summary: string[], inForceVersionId, replacedVersionId, message }` | saves a NEW pending, unapproved version; the earlier pending version (`replacedVersionId`) is superseded and can no longer be approved. Rules identical to the pending version return it unchanged (`changed: false`); identical to the rules in force with nothing pending change nothing (`changed: false, approved: true`, the in-force `versionId`). `summary` is of the stored rules of `versionId`. Nothing changes until approved. | idempotent |
+| `approve_campaign` | **Sensitive write** | `{ versionId }` | `{ versionId, approvedAt, approvedVia: "muse", campaignStatus, summary }` | approves the version (`approvedVia: 'muse'`); it becomes the rules in force, and a first approval activates the campaign. Only the current pending version can be approved: a superseded `versionId` is an error ("These rules changed after you reviewed them. Review the latest summary and approve again." plus the next step: call `get_campaign`/`propose_campaign`, show the new summary, ask again) and approves nothing | destructive |
+| `prepare_application` | Write | `{ jobId }` | `{ applicationId, jobId, status, decidedBy, ok, reason, topChoice, packet \| null }` | creates the Application (`prepared` if the rule check passes, otherwise `waiting` with the reason) and its audit entry; a top-choice company also gets a referral-ask draft. Again for a waiting row: re-checked (a pass prepares it with the campaign's resume; a different failing reason updates the reason, audits and, for a top choice, drafts the referral ask; a Skip/Approve the user made meanwhile is kept). A closed posting is an error ("This posting has closed."). | idempotent |
+| `submit_application` | **Sensitive write** | `{ applicationId }` | `{ applicationId, applyUrl, packet, nextStep }` | writes the audit entry (`application.packet_requested`) and, when it returns the packet, stamps `Application.packetReleasedAt` (the packet is released, so `record_submission` can record it later even after a pause or rules edit). Inroad submits nothing. | destructive, idempotent |
+| `record_submission` | Write | `{ applicationId, confirmationText?: string ≤ 2000 }` | `{ applicationId, status: "submitted", submittedAt }` | marks it `submitted` and writes `application.submitted`, only if `submit_application` released its packet (stays recordable after a later pause or rules edit) or it may go out right now; otherwise an error with the reason, nothing recorded, and `application.record_refused` audited | idempotent |
 | `run_weekly_pass` | Write | `{}` | `{ submitted: string[], waiting: string[], referralDrafts: string[], failed: string[], reason: string \| null }` ("Company · Title") | runs `prepare_application` for every new match the approved campaign covers | idempotent: no |
 
 ### Permissions and approval flow
 
 - `approve_campaign`: Muse must first show the user the summary returned by `propose_campaign` (or `get_campaign`'s
-  `pending.summary`) for that exact `versionId` and get an explicit yes. If the rules change, propose again and ask again
+  `pending.summary`) for that exact `versionId` and get an explicit yes. A version's rules never change, and only the
+  current pending version can be approved: if the rules changed after the summary was shown (the user saved on the web,
+  or another proposal), `approve_campaign` refuses with `stale_version` and approves nothing. If the rules change, propose again and ask again
   (guideline §3.4: "Allow once" covers only what was shown). This is stated in the tool description.
 - `submit_application` returns the packet and the apply URL **only** when the application may go out right now:
   the user approved it in Inroad (`decidedBy: user`), or it is `prepared` by the campaign **and** the rule check passes at
   call time (campaign active and not ended, company on the auto list, role type, minimum match, weekly cap not counting
-  this application). Otherwise it returns an error result with the reason and releases nothing. Muse's own browser agent
+  this application), and the posting has not closed (a closed posting is refused even when the user approved it).
+  Otherwise it returns an error result with the reason and releases nothing. Muse's own browser agent
   fills the employer's form under Muse's own controls; afterwards Muse calls `record_submission`.
+- `record_submission` runs the same gate as the web "Mark as submitted" (inside `recordSubmission`): a held application
+  whose packet was never released cannot be recorded.
 - Nothing in any description asks Muse to skip, batch or pre-approve its own permission prompts. Inroad's campaign consent
   sits on top of Muse's prompts; it does not replace them.
 

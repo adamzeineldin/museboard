@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { campaignCardModel } from "./campaign-card-model";
-import { formatRelative, formatShortDate } from "./format";
+import { formatLongDate, formatRelative, formatShortDate } from "./format";
 import { museEventModel } from "./muse-event-model";
 
 describe("formatShortDate", () => {
   it("formats a calendar day without timezone drift", () => {
     expect(formatShortDate("2026-12-15")).toBe("Dec 15");
     expect(formatShortDate("not-a-date")).toBe("not-a-date");
+  });
+  it("formatLongDate includes the year", () => {
+    expect(formatLongDate("2026-12-15")).toBe("Dec 15, 2026");
+    expect(formatLongDate("2031-01-02")).toBe("Jan 2, 2031");
+    expect(formatLongDate("not-a-date")).toBe("not-a-date");
   });
 });
 
@@ -33,7 +38,7 @@ describe("campaignCardModel", () => {
   it("matches the prototype copy for an active campaign", () => {
     expect(campaignCardModel({ status: "active", weeklyCap: 5, endsOn: "2026-12-15", weekCount: 2 })).toEqual({
       kind: "active",
-      heading: "Active · 2 of 5 this week",
+      heading: "Active · 2 of 5 used this week",
       meterPercent: 40,
       endsLabel: "Ends Dec 15",
     });
@@ -41,11 +46,11 @@ describe("campaignCardModel", () => {
 
   it("caps the meter and handles paused and unknown counts", () => {
     expect(campaignCardModel({ status: "paused", weeklyCap: 2, endsOn: "2026-12-15", weekCount: 5 })).toMatchObject({
-      heading: "Paused · 5 of 2 this week",
+      heading: "Paused · 5 of 2 used this week",
       meterPercent: 100,
     });
     expect(campaignCardModel({ status: "active", weeklyCap: 5, endsOn: "2026-12-15", weekCount: null })).toMatchObject({
-      heading: "Active · – of 5 this week",
+      heading: "Active · – of 5 used this week",
       meterPercent: 0,
     });
   });
