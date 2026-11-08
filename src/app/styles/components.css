@@ -7,8 +7,9 @@
 
   /* App shell: rail | main | Muse panel */
   .app{display:grid;grid-template-columns:232px minmax(0,1fr) 370px;min-height:100vh;padding-right:env(safe-area-inset-right,0px)}
-  @media (max-width:1180px){.app{grid-template-columns:220px minmax(0,1fr)}.muse{grid-column:2}}
-  @media (max-width:760px){.app{grid-template-columns:minmax(0,1fr);padding-right:0}.muse{grid-column:1}}
+  /* Two columns: the rail spans both rows so the Muse panel sits right under the page, not after a full-height row. */
+  @media (max-width:1180px){.app{grid-template-columns:220px minmax(0,1fr);grid-template-rows:auto 1fr}.rail{grid-row:1 / span 2}.muse{grid-column:2;align-self:start}}
+  @media (max-width:760px){.app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr;padding-right:0}.rail{grid-row:auto}.muse{grid-column:1}}
 
   /* Nav rail */
   .rail{background:var(--surface);border-right:1px solid var(--line);padding:20px 14px 20px max(14px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:22px;position:sticky;top:0;height:100vh}
