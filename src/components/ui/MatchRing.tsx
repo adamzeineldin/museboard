@@ -17,7 +17,7 @@ export function MatchRing({ score, className }: MatchRingProps) {
   const dash = `${((value / 100) * CIRCUMFERENCE).toFixed(1)} ${CIRCUMFERENCE.toFixed(1)}`;
   return (
     <div className={cx("job-score", fair && "fair", className)} role="img" aria-label={`${value}% match, ${label}`}>
-      <div className="ring">
+      <div className="match-ring">
         <svg viewBox="0 0 76 76" aria-hidden="true">
           <circle cx="38" cy="38" r={RADIUS} fill="none" stroke="var(--ring-track)" strokeWidth="7" />
           <circle

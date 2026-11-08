@@ -1,0 +1,3 @@
+Jordan Lee - Software Engineer
+Skills: Python, TypeScript, Go
+Built a Raft key-value store in Go.

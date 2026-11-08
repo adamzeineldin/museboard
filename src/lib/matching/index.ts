@@ -1,9 +1,8 @@
 import "server-only";
-import { notImplemented } from "@/lib/not-implemented";
 
-// Contract: docs/ARCHITECTURE.md "Cross-module function contract". Implemented in milestone 4.
-
-/** Recompute Match rows for a user against open jobs. Returns the number of matches written. */
-export async function recomputeMatches(userId: string): Promise<number> {
-  return notImplemented("recomputeMatches", userId);
-}
+// Contract: docs/ARCHITECTURE.md (src/lib/matching). fitSummary is pure: import it from
+// "@/lib/matching/fit-summary" in code that must not pull in server-only modules.
+export { recomputeMatches, type RecomputeDeps } from "./recompute";
+export { cosine, getEmbedder, LocalHashingEmbedder, EMBEDDER_ENV, type Embedder } from "./embedder";
+export { parseMatchReasons, scoreMatch, textForJob, type MatchReasons, type MatchScore } from "./score";
+export { fitSummary, type FitSummaryJob } from "./fit-summary";
