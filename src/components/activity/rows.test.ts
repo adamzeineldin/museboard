@@ -16,12 +16,13 @@ describe("toRowModels", () => {
           resumeFilename: "Resume_v3.pdf",
           packet: null,
           release: { allowed: true, reason: "Approved by you" },
+          packetReleased: false,
           events: [{ id: "e1", actor: "user", action: "application.approved", payload: {}, createdAt: new Date("2026-11-07T19:14:00Z") }],
         },
       ],
       "America/New_York",
     );
-    expect(row).toMatchObject({ approvedByYou: true, jobUrl: "https://jobs.example.com/1", held: null });
+    expect(row).toMatchObject({ approvedByYou: true, jobUrl: "https://jobs.example.com/1", held: null, recordable: true });
     expect(row.history).toEqual([
       { id: "e1", text: "You: Approved. Ready to submit.", when: "Nov 7, 2:14 PM", iso: "2026-11-07T19:14:00.000Z" },
     ]);
@@ -35,6 +36,7 @@ describe("toRowModels", () => {
       jobUrl: "https://jobs.example.com/1",
       resumeFilename: null,
       packet: null,
+      packetReleased: false,
       events: [],
     };
     const rows = toRowModels(
@@ -54,6 +56,53 @@ describe("toRowModels", () => {
     ]);
   });
 
+  it("a held row whose packet was already released can still be marked submitted", () => {
+    const base = {
+      status: "prepared" as const,
+      decidedBy: "campaign",
+      reason: "Fits campaign rules",
+      companyName: "Stripe",
+      title: "SWE Intern",
+      jobUrl: "https://jobs.example.com/1",
+      resumeFilename: null,
+      packet: null,
+      release: { allowed: false, reason: "Campaign is paused" },
+      events: [],
+    };
+    const rows = toRowModels(
+      [
+        { ...base, id: "released", packetReleased: true },
+        { ...base, id: "never", packetReleased: false },
+      ],
+      "UTC",
+    );
+    expect(rows.map((row) => [row.id, row.held, row.recordable])).toEqual([
+      ["released", "Campaign is paused", true],
+      ["never", "Campaign is paused", false],
+    ]);
+  });
+
+  it("only prepared rows are recordable", () => {
+    const rows = toRowModels(
+      (["waiting", "submitted", "skipped"] as const).map((status) => ({
+        id: status,
+        status,
+        decidedBy: "user",
+        reason: "x",
+        companyName: "Ramp",
+        title: "SWE Intern",
+        jobUrl: "",
+        resumeFilename: null,
+        packet: null,
+        release: null,
+        packetReleased: true,
+        events: [],
+      })),
+      "UTC",
+    );
+    expect(rows.map((row) => row.recordable)).toEqual([false, false, false]);
+  });
+
   it("only prepared rows can be held", () => {
     const [row] = toRowModels(
       [
@@ -68,6 +117,7 @@ describe("toRowModels", () => {
           resumeFilename: null,
           packet: null,
           release: null,
+          packetReleased: false,
           events: [],
         },
       ],

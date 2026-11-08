@@ -89,6 +89,8 @@ e2e/                        Playwright: done-criteria journey, axe (WCAG 2.1 AA)
   released packet stays recordable after a pause or a rules edit (it records a true event). Anything else throws
   `ApplicationError('not_released')` (with `reason`) and audits `application.record_refused` with the caller's actor.
   Already submitted stays idempotent. `application.submitted` records `allowedBy: 'packet_released'|'release_check'`.
+  The Activity row model mirrors this gate with `recordable` (prepared, and releasable now or `packetReleased`), so a
+  held row whose packet already went out still shows "Mark as submitted" while its packet stays hidden.
 - `skipped` — the user skipped it.
 
 ## weekCount (cap accounting)

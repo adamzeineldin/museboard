@@ -90,6 +90,16 @@ describe("release check (web and Muse parity)", () => {
     expect(byId.get(ramp.id)?.release).toBeNull();
   });
 
+  it("getActivity marks rows whose packet Muse already received", async () => {
+    const { world, datadog, stripe } = await overCapWorld();
+    expect((await getSubmissionPacket(world.user.id, stripe.id, NOW, "muse")).allowed).toBe(true);
+    await setCampaignStatus(world.user.id, "paused");
+    const activity = await getActivity(world.user.id, world.user.timezone, NOW);
+    const byId = new Map(activity.items.map((item) => [item.id, item]));
+    expect(byId.get(stripe.id)).toMatchObject({ packetReleased: true, release: { allowed: false, reason: "Campaign is paused" } });
+    expect(byId.get(datadog.id)?.packetReleased).toBe(false);
+  });
+
   it("a submitted row still counts: the held row stays held after the other one is submitted", async () => {
     const { world, stripe, datadog } = await overCapWorld();
     await recordSubmission(world.user.id, stripe.id, "user");

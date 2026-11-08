@@ -16,6 +16,7 @@ const LIMIT = "Weekly limit reached";
 test.describe.configure({ mode: "serial" });
 
 let page: Page;
+let museToken = "";
 
 test.beforeAll(async ({ browser }) => {
   const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
@@ -115,7 +116,13 @@ test("approve over the cap: one campaign-prepared row is held with 'Weekly limit
 
 test("opens a packet and marks a ready application submitted", async () => {
   await page.goto("/activity");
-  const ready = page.getByRole("list", { name: "Applications" }).getByRole("listitem").filter({ has: page.getByText("Ready to submit", { exact: true }) }).first();
+  // The user-approved row: the campaign-prepared one is kept for the released-then-paused test below.
+  const ready = page
+    .getByRole("list", { name: "Applications" })
+    .getByRole("listitem")
+    .filter({ has: page.getByText("Ready to submit", { exact: true }) })
+    .filter({ hasText: "Approved by you" });
+  await expect(ready).toHaveCount(1);
   await ready.getByText("View packet").click();
   await expect(ready.getByText("Inroad leaves these to you")).toBeVisible();
   await expect(ready.getByText(/Work authorization and visa sponsorship: Inroad never answers these/)).toBeVisible();
@@ -180,6 +187,7 @@ test("settings: a Muse connector token works with an MCP client, and Muse sees t
   await page.getByRole("button", { name: "Create access token" }).click();
   const token = await page.getByRole("textbox", { name: "Access token" }).inputValue();
   expect(token).toMatch(/^inr_[A-Za-z0-9_-]{20,}$/);
+  museToken = token;
   await expectNoAxeViolations(page, "/settings with a token");
 
   const client = await connectMuse(new URL("/mcp", page.url()), token);
@@ -206,4 +214,44 @@ test("settings: a Muse connector token works with an MCP client, and Muse sees t
   } finally {
     await client.close();
   }
+});
+
+test("a packet Muse already received stays recordable after the campaign is paused", async () => {
+  await page.goto("/activity");
+  const ready = page.getByRole("list", { name: "Applications" }).getByRole("listitem").filter({ has: page.getByText("Ready to submit", { exact: true }) });
+  await expect(ready).toHaveCount(1);
+  const name = (await ready.locator(".t").textContent()) ?? "";
+  const company = name.split(" · ")[0];
+
+  const client = await connectMuse(new URL("/mcp", page.url()), museToken);
+  try {
+    const roles = await callTool(client, "find_roles");
+    const row = ((roles.data.roles ?? []) as Array<{ company: string; applicationId: string | null }>).find((role) => role.company === company);
+    const released = await callTool(client, "submit_application", { applicationId: row?.applicationId });
+    expect(released.isError).toBeFalsy();
+  } finally {
+    await client.close();
+  }
+
+  await page.goto("/campaign");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Campaign paused." })).toBeAttached();
+
+  await page.goto("/activity");
+  const releasedRow = activityRow(page, company);
+  await expect(releasedRow.getByText("Held: Campaign is paused", { exact: true })).toBeVisible();
+  await expect(releasedRow.getByText(/Muse already received this packet/)).toBeVisible();
+  await expect(releasedRow.getByText("View packet")).toHaveCount(0);
+  const neverReleased = page
+    .getByRole("list", { name: "Applications" })
+    .getByRole("listitem")
+    .filter({ has: page.getByText("Held: Campaign is paused", { exact: true }) })
+    .filter({ hasNot: page.locator(".t", { hasText: new RegExp(`^${company} · `) }) });
+  await expect(neverReleased).toHaveCount(1);
+  await expect(neverReleased.getByRole("button", { name: /Mark as submitted/ })).toHaveCount(0);
+  await expectNoAxeViolations(page, "/activity with a released, held row");
+
+  await releasedRow.getByRole("button", { name: `Mark as submitted: ${name}` }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Marked as submitted" })).toBeAttached();
+  await expect(activityRow(page, company)).toContainText("Applied");
 });

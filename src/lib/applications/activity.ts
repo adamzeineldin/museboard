@@ -31,6 +31,8 @@ export interface ActivityItem {
   submittedAt: Date | null;
   /** Prepared rows only: whether the packet may be released right now (same verdict as getSubmissionPacket). */
   release: ReleaseVerdict | null;
+  /** Prepared rows: Muse already received this decision's packet, so the submission stays recordable. */
+  packetReleased: boolean;
   /** Newest first. */
   events: ActivityEvent[];
 }
@@ -141,6 +143,7 @@ export async function getActivity(
     createdAt: app.createdAt,
     submittedAt: app.submittedAt,
     release: verdicts.get(app.id) ?? null,
+    packetReleased: app.status === "prepared" && app.packetReleasedAt !== null,
     events: eventsById.get(app.id) ?? [],
   }));
   return {

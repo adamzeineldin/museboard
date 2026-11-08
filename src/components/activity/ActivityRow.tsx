@@ -29,7 +29,16 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
     );
   }
   if (row.status === "prepared" && row.held) {
-    return <Chip tone="hold">{heldLabel(row.held)}</Chip>;
+    return (
+      <>
+        <Chip tone="hold">{heldLabel(row.held)}</Chip>
+        {row.recordable ? (
+          <Button size="small" onClick={() => onMarkSubmitted(row.id)} disabled={busy} aria-label={`Mark as submitted: ${name}`}>
+            Mark as submitted
+          </Button>
+        ) : null}
+      </>
+    );
   }
   if (row.status === "prepared") {
     return (
@@ -70,7 +79,13 @@ export function ActivityRow(props: ActivityRowProps) {
         <RowActions {...props} />
       </div>
       <div className="col-span-full flex flex-col gap-2">
-        {row.status === "prepared" && row.held ? (
+        {row.status === "prepared" && row.held && row.recordable ? (
+          <p className="muted text-[.82rem]">
+            Muse already received this packet before it was held, so Inroad won&apos;t release it again. If the
+            application was sent, you can still mark it as submitted.
+          </p>
+        ) : null}
+        {row.status === "prepared" && row.held && !row.recordable ? (
           <p className="muted text-[.82rem]">
             Inroad won&apos;t release this packet while the rule check says no. It becomes ready again on its own once your
             rules allow it (for example next week, or after you resume the campaign).
