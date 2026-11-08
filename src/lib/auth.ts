@@ -1,8 +1,8 @@
 import "server-only";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import NextAuth from "next-auth";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { writeAudit } from "./audit";
+import { createAuthAdapter } from "./auth-adapter";
 import { deliverMagicLink } from "./auth-mail";
 import { db } from "./db";
 
@@ -15,7 +15,7 @@ const DEFAULT_FROM = "Inroad <no-reply@inroad.local>";
 const UNUSED_SMTP_PLACEHOLDER = "smtp://localhost:25";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(db as unknown as Parameters<typeof PrismaAdapter>[0]),
+  adapter: createAuthAdapter(db),
   session: { strategy: "database" },
   pages: {
     signIn: "/signin",
