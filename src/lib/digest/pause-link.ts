@@ -36,6 +36,21 @@ export async function inspectPauseLink(token: unknown, now: Date = new Date()): 
   }
 }
 
+/**
+ * The pause is already committed (and audited as `campaign.paused` by the campaign service), so a failure
+ * here is logged, never reported to the user as "Nothing was changed".
+ */
+async function auditPausedViaEmail(userId: string, campaignId: string | undefined): Promise<void> {
+  try {
+    await writeAudit(userId, "user", PAUSED_VIA_EMAIL_ACTION, { campaignId, via: "digest_email" });
+  } catch (error) {
+    console.error("[digest] campaign paused via email but the extra audit entry failed", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /** Pause the campaign named in the token. Audits `campaign.paused_via_email` (actor 'user'). */
 export async function pauseCampaignFromLink(token: unknown, now: Date = new Date()): Promise<LinkOutcome> {
   const checked = checkLink(token, "pause", now);
@@ -51,7 +66,7 @@ export async function pauseCampaignFromLink(token: unknown, now: Date = new Date
       if (isCampaignError(error)) return inspect(checked.claims);
       throw error;
     }
-    await writeAudit(userId, "user", PAUSED_VIA_EMAIL_ACTION, { campaignId, via: "digest_email" });
+    await auditPausedViaEmail(userId, campaignId);
     return { status: "done", message: MESSAGES.done };
   } catch (error) {
     return failure("pause via email", userId, error);

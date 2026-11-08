@@ -54,6 +54,9 @@ export interface AppSeed {
   reason?: string;
   submittedAt?: Date;
   decidedAt?: Date;
+  decidedBy?: "campaign" | "user";
+  /** Writes a Match row so the release check can pass for a campaign-prepared row. */
+  matchScore?: number;
 }
 
 export async function seedApplication(world: DigestWorld, seed: AppSeed): Promise<string> {
@@ -69,13 +72,16 @@ export async function seedApplication(world: DigestWorld, seed: AppSeed): Promis
       source: "greenhouse",
     },
   });
+  if (seed.matchScore !== undefined) {
+    await db.match.create({ data: { userId: world.user.id, jobId: job.id, score: seed.matchScore, reasons: [] } });
+  }
   const app = await db.application.create({
     data: {
       userId: world.user.id,
       jobId: job.id,
       resumeId: world.resumeId,
       status: seed.status,
-      decidedBy: "campaign",
+      decidedBy: seed.decidedBy ?? "campaign",
       reason: seed.reason ?? "Fits campaign rules",
       submittedAt: seed.submittedAt ?? null,
       decidedAt: seed.decidedAt ?? null,

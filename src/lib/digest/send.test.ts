@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db, resetDb } from "@/test/db";
+import type { BuiltDigest } from "./build";
 import type { DigestEnvelope, DigestMailer } from "./mailer";
 import { DIGEST_SENT_ACTION, redactSecrets, sendWeeklyDigests } from "./send";
 import { approvedCampaign, LINK_CONFIG, MONDAY, newDigestWorld, seedApplication } from "./testing/fixtures";
@@ -13,6 +14,45 @@ function fakeMailer(failFor: (envelope: DigestEnvelope) => boolean = () => false
       sent.push(envelope);
     },
   };
+}
+
+/** A mailer whose sends wait until release() is called, so two runs can overlap. */
+function blockingMailer(): DigestMailer & { calls: DigestEnvelope[]; release: () => void } {
+  const calls: DigestEnvelope[] = [];
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    calls,
+    release: () => release(),
+    async send(envelope) {
+      calls.push(envelope);
+      await gate;
+    },
+  };
+}
+
+/** A build stub that returns a sendable digest for any user, without loading anything. */
+function stubBuild(): (userId: string) => Promise<BuiltDigest> {
+  const start = new Date("2026-11-02T05:00:00Z");
+  const end = new Date("2026-11-09T05:00:00Z");
+  return async (userId) =>
+    ({
+      status: "ready",
+      to: `${userId}@inroad.test`,
+      data: {
+        week: { start, end },
+        submitted: { total: 0 },
+        ready: { total: 0 },
+        held: { total: 0 },
+        waiting: { total: 0 },
+        referralDrafts: { total: 0 },
+        campaign: { kind: "none" },
+      },
+      links: { unsubscribe: "https://inroad.test/digest/unsubscribe?token=a.b" },
+      message: { subject: "s", text: "t", html: "h" },
+    }) as unknown as BuiltDigest;
 }
 
 describe("sendWeeklyDigests", () => {
@@ -72,6 +112,46 @@ describe("sendWeeklyDigests", () => {
     const nextWeek = await sendWeeklyDigests(new Date(MONDAY.getTime() + 7 * 86_400_000), { mailer, links: LINK_CONFIG });
     expect(nextWeek.sent).toBe(1);
     expect(mailer.sent).toHaveLength(2);
+  });
+
+  it("sends once when two runs overlap for the same week", async () => {
+    const world = await newDigestWorld();
+    await approvedCampaign(world);
+    const mailer = blockingMailer();
+    const first = sendWeeklyDigests(MONDAY, { mailer, links: LINK_CONFIG, logError: vi.fn() });
+    await vi.waitFor(() => expect(mailer.calls).toHaveLength(1));
+    let secondDone = false;
+    const second = sendWeeklyDigests(MONDAY, { mailer, links: LINK_CONFIG, logError: vi.fn() }).finally(() => {
+      secondDone = true;
+    });
+    // Either the second run finishes on its own (claimed slot) or it reaches the mailer too (double send).
+    await vi.waitFor(() => expect(secondDone || mailer.calls.length > 1).toBe(true));
+    mailer.release();
+    expect(await first).toEqual({ users: 1, sent: 1, skipped: 0, failed: 0 });
+    expect(await second).toEqual({ users: 1, sent: 0, skipped: 1, failed: 0 });
+    expect(mailer.calls).toHaveLength(1);
+  });
+
+  it("retries a user whose send failed on the next run", async () => {
+    const world = await newDigestWorld();
+    await approvedCampaign(world);
+    const failing = await sendWeeklyDigests(MONDAY, { mailer: fakeMailer(() => true), links: LINK_CONFIG, logError: vi.fn() });
+    expect(failing.failed).toBe(1);
+    const mailer = fakeMailer();
+    expect(await sendWeeklyDigests(MONDAY, { mailer, links: LINK_CONFIG, logError: vi.fn() })).toMatchObject({ sent: 1, failed: 0 });
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it("pages through every user exactly once (more than two pages)", async () => {
+    const total = 205;
+    await db.user.createMany({
+      data: Array.from({ length: total }, (_, i) => ({ email: `paged${i}@inroad.test`, timezone: "America/New_York" })),
+    });
+    const mailer = fakeMailer();
+    const summary = await sendWeeklyDigests(MONDAY, { mailer, links: LINK_CONFIG, build: stubBuild(), logError: vi.fn() });
+    expect(summary).toEqual({ users: total, sent: total, skipped: 0, failed: 0 });
+    expect(mailer.sent).toHaveLength(total);
+    expect(new Set(mailer.sent.map((e) => e.userId)).size).toBe(total);
   });
 });
 

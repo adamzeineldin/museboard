@@ -25,7 +25,13 @@ describe("buildDigest", () => {
     await seedApplication(world, { company: "Stripe", title: "SWE Intern", status: "submitted", submittedAt: new Date("2026-11-09T04:30:00Z") });
     await seedApplication(world, { company: "Datadog", title: "Old Intern", status: "submitted", submittedAt: new Date("2026-11-02T04:59:00Z") });
     await seedApplication(world, { company: "Datadog", title: "Next Week Intern", status: "submitted", submittedAt: new Date("2026-11-09T05:00:00Z") });
-    await seedApplication(world, { company: "Datadog", title: "Backend Intern", status: "prepared", decidedAt: new Date("2026-11-04T12:00:00Z") });
+    await seedApplication(world, {
+      company: "Datadog",
+      title: "Backend Intern",
+      status: "prepared",
+      decidedAt: new Date("2026-11-04T12:00:00Z"),
+      matchScore: 90,
+    });
     await seedApplication(world, { company: "Meta", title: "SWE Intern 2027", status: "waiting", reason: "Top choice: referral first" });
     await seedApplication(world, { company: "Acme", title: "Skipped Intern", status: "skipped" });
     await seedReferralDraft(world, "Priya Shah", "Meta", new Date("2026-11-05T12:00:00Z"));
@@ -79,6 +85,55 @@ describe("buildDigest", () => {
     expect(built.data.campaign.kind).toBe("paused");
     expect(built.links.pause).toBeNull();
     expect(built.message.text).not.toContain("Pause campaign");
+  });
+
+  it("lists only releasable prepared rows as ready: a paused campaign's own rows are held, your approvals stay", async () => {
+    const world = await newDigestWorld();
+    await approvedCampaign(world);
+    await seedApplication(world, { company: "Datadog", title: "Held Intern", status: "prepared", decidedAt: new Date("2026-11-04T12:00:00Z"), matchScore: 90 });
+    await seedApplication(world, {
+      company: "Meta",
+      title: "Approved Intern",
+      status: "prepared",
+      decidedBy: "user",
+      reason: "Approved by you",
+      decidedAt: new Date("2026-11-05T12:00:00Z"),
+    });
+    await setCampaignStatus(world.user.id, "paused");
+    const built = await ready(world.user.id);
+    expect(built.data.ready.items.map((r) => r.title)).toEqual(["Approved Intern"]);
+    expect(built.data.ready.total).toBe(1);
+    expect(built.data.held.items.map((r) => r.title)).toEqual(["Held Intern"]);
+    expect(built.data.held.items[0]?.reason).toBe("Campaign is paused");
+    const readySection = built.message.text.split("Ready to submit")[1]?.split("Not going out right now")[0] ?? "";
+    expect(readySection).not.toContain("Held Intern");
+  });
+
+  it("still sends a paused campaign's digest when its only news is held rows, and says they are held", async () => {
+    const world = await newDigestWorld();
+    await approvedCampaign(world);
+    await seedApplication(world, { company: "Datadog", title: "Held Intern", status: "prepared", decidedAt: new Date("2026-11-04T12:00:00Z"), matchScore: 90 });
+    await seedApplication(world, { company: "Stripe", title: "Other Intern", status: "prepared", decidedAt: new Date("2026-11-05T12:00:00Z"), matchScore: 80 });
+    await setCampaignStatus(world.user.id, "paused");
+    const built = await ready(world.user.id);
+    expect(built.data.ready).toEqual({ items: [], total: 0 });
+    expect(built.data.held.total).toBe(2);
+    for (const body of [built.message.text, built.message.html.replaceAll("&#39;", "'")]) {
+      expect(body).toContain("2 applications can't go out right now. Each one says why.");
+      expect(body).toContain("Held: Campaign is paused");
+      expect(body).toContain("Held Intern");
+    }
+    expect(built.message.html).toContain("0 waiting on you, 2 held.<");
+  });
+
+  it("drops held rows from the ready count when nothing is releasable", async () => {
+    const world = await newDigestWorld();
+    await approvedCampaign(world);
+    await seedApplication(world, { company: "Datadog", title: "Held Intern", status: "prepared", decidedAt: new Date("2026-11-04T12:00:00Z"), matchScore: 90 });
+    await seedApplication(world, { company: "Meta", title: "SWE Intern", status: "waiting", reason: "Top choice: referral first" });
+    await setCampaignStatus(world.user.id, "paused");
+    const built = await ready(world.user.id);
+    expect(built.data.ready).toEqual({ items: [], total: 0 });
   });
 
   it("sends an active campaign's digest even in a quiet week", async () => {

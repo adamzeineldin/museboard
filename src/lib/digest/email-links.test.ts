@@ -7,6 +7,17 @@ import { approvedCampaign, MONDAY, newDigestWorld, SECRET } from "./testing/fixt
 import { LINK_TOKEN_TTL_MS, signLinkToken } from "./tokens";
 import { inspectUnsubscribeLink, unsubscribeFromLink, UNSUBSCRIBED_VIA_EMAIL_ACTION } from "./unsubscribe-link";
 
+// Lets a test make one audit action fail, to check the state change and its audit commit together.
+const auditFailure = vi.hoisted(() => ({ actions: new Set<string>() }));
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    writeAudit: (...args: Parameters<typeof actual.writeAudit>) =>
+      auditFailure.actions.has(args[2]) ? Promise.reject(new Error("SQLITE_BUSY")) : actual.writeAudit(...args),
+  };
+});
+
 const LATER = new Date(MONDAY.getTime() + 60_000);
 const pauseToken = (userId: string, campaignId: string, at = MONDAY) => signLinkToken({ purpose: "pause", userId, campaignId }, SECRET, at);
 const unsubToken = (userId: string, at = MONDAY) => signLinkToken({ purpose: "unsubscribe", userId }, SECRET, at);
@@ -18,6 +29,7 @@ beforeEach(async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 afterEach(() => {
+  auditFailure.actions.clear();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
@@ -43,6 +55,16 @@ describe("pause link", () => {
     expect(await audits(world.user.id, PAUSED_VIA_EMAIL_ACTION)).toEqual([
       expect.objectContaining({ actor: "user", payload: { campaignId: campaign.id, via: "digest_email" } }),
     ]);
+    expect(await audits(world.user.id, "campaign.paused")).toHaveLength(1);
+  });
+
+  it("reports done when the pause committed even if the extra email audit fails", async () => {
+    const world = await newDigestWorld();
+    const campaign = await approvedCampaign(world);
+    auditFailure.actions.add(PAUSED_VIA_EMAIL_ACTION);
+    const outcome = await pauseCampaignFromLink(pauseToken(world.user.id, campaign.id), LATER);
+    expect(outcome.status).toBe("done");
+    expect((await db.campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe("paused");
     expect(await audits(world.user.id, "campaign.paused")).toHaveLength(1);
   });
 
@@ -109,6 +131,16 @@ describe("unsubscribe link", () => {
     expect((await unsubscribeFromLink(token, LATER)).status).toBe("already");
     expect((await inspectUnsubscribeLink(token, LATER)).status).toBe("already");
     expect(await audits(world.user.id, UNSUBSCRIBED_VIA_EMAIL_ACTION)).toHaveLength(1);
+  });
+
+  it("leaves the digest on and says nothing changed when the audit can't be written", async () => {
+    const world = await newDigestWorld();
+    auditFailure.actions.add(UNSUBSCRIBED_VIA_EMAIL_ACTION);
+    expect(await unsubscribeFromLink(unsubToken(world.user.id), LATER)).toEqual({ status: "error", message: LINK_MESSAGES.error });
+    expect((await db.user.findUniqueOrThrow({ where: { id: world.user.id } })).digestOptOut).toBe(false);
+
+    auditFailure.actions.clear();
+    expect((await unsubscribeFromLink(unsubToken(world.user.id), LATER)).status).toBe("done");
   });
 
   it("rejects pause tokens, expired tokens and deleted users", async () => {

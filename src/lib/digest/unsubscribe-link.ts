@@ -39,9 +39,13 @@ export async function unsubscribeFromLink(token: unknown, now: Date = new Date()
   if (!checked.ok) return checked.outcome;
   const { userId } = checked.claims;
   try {
-    const { count } = await db.user.updateMany({ where: { id: userId, digestOptOut: false }, data: { digestOptOut: true } });
-    if (count === 0) return inspect(userId);
-    await writeAudit(userId, "user", UNSUBSCRIBED_VIA_EMAIL_ACTION, { via: "digest_email" });
+    // The opt-out and its audit commit together: a failed audit leaves the digest on, matching the error copy.
+    const changed = await db.$transaction(async (tx) => {
+      const { count } = await tx.user.updateMany({ where: { id: userId, digestOptOut: false }, data: { digestOptOut: true } });
+      if (count > 0) await writeAudit(userId, "user", UNSUBSCRIBED_VIA_EMAIL_ACTION, { via: "digest_email" }, tx);
+      return count > 0;
+    });
+    if (!changed) return inspect(userId);
     return { status: "done", message: MESSAGES.done };
   } catch (error) {
     return failure("unsubscribe via email", userId, error);

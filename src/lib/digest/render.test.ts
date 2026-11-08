@@ -23,6 +23,7 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
     week: digestWeek(NOW, TZ),
     submitted: { items: [role("Stripe", "Software Engineer Intern", new Date("2026-11-03T15:00:00Z"))], total: 1 },
     ready: { items: [role("Datadog", "Backend Intern", new Date("2026-11-04T15:00:00Z"), "Approved by you")], total: 1 },
+    held: { items: [], total: 0 },
     waiting: { items: [role("Meta", "Software Engineer Intern, 2027", null, "Top choice: referral first")], total: 3 },
     referralDrafts: {
       items: [{ contactName: "Priya Shah", company: "Meta", title: "Software Engineer Intern, 2027", createdAt: NOW, markedSent: false }],
@@ -78,6 +79,7 @@ describe("renderDigest content", () => {
         firstName: null,
         submitted: empty,
         ready: empty,
+        held: empty,
         waiting: empty,
         referralDrafts: empty,
         campaign: { kind: "paused", campaignId: "camp_1", weekCount: 0, weeklyCap: 5, endsOn: "2026-12-15", hasPendingChanges: true },
@@ -95,6 +97,36 @@ describe("renderDigest content", () => {
       expect(body).toContain("until you approve the new one");
       expect(body).not.toContain("Pause campaign");
     }
+  });
+
+  it("lists held rows in their own section only when there are some", () => {
+    const quiet = renderDigest(data(), links);
+    expect(quiet.text).not.toContain("Not going out right now");
+    const held = renderDigest(data({ held: { items: [role("Acme", "Data Intern", null, "This posting has closed.")], total: 1 } }), links);
+    for (const body of [held.text, held.html.replaceAll("&#39;", "'")]) {
+      expect(body).toContain("Not going out right now");
+      expect(body).toContain("1 application can't go out right now. It says why.");
+      expect(body).toContain("Held: This posting has closed.");
+      expect(body).not.toContain("held by your rules");
+    }
+    const many = renderDigest(data({ held: { items: [role("Acme", "Data Intern", null, "This posting has closed.")], total: 3 } }), links);
+    expect(many.text).toContain("3 applications can't go out right now. Each one says why.");
+  });
+
+  it("counts held rows in the preheader only when there are some", () => {
+    expect(renderDigest(data(), links).html).toContain("1 application went out, 1 ready to submit, 3 waiting on you.<");
+    const pausedHeldOnly = renderDigest(
+      data({
+        submitted: empty,
+        ready: empty,
+        waiting: empty,
+        referralDrafts: empty,
+        held: { items: [role("Acme", "Data Intern", null, "Campaign is paused")], total: 2 },
+        campaign: { kind: "paused", campaignId: "camp_1", weekCount: 0, weeklyCap: 5, endsOn: null, hasPendingChanges: false },
+      }),
+      { ...links, pause: null },
+    );
+    expect(pausedHeldOnly.html).toContain("0 applications went out, 0 ready to submit, 0 waiting on you, 2 held.<");
   });
 
   it.each([

@@ -49,6 +49,8 @@ export interface DigestData {
   week: DigestWeek;
   submitted: DigestList<DigestRole>;
   ready: DigestList<DigestRole>;
+  /** Prepared rows the release check refuses right now; `reason` is the refusal (e.g. "Campaign is paused"). */
+  held: DigestList<DigestRole>;
   waiting: DigestList<DigestRole>;
   referralDrafts: DigestList<DigestReferralDraft>;
   campaign: DigestCampaign;

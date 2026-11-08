@@ -4,13 +4,14 @@ import { db } from "@/lib/db";
 import { buildDigest, type BuiltDigest } from "./build";
 import { digestLinkConfig, type DigestLinkConfig } from "./config";
 import { createDigestMailer, type DigestMailer } from "./mailer";
+import { claimDigestWeek, DIGEST_SENT_ACTION, releaseDigestWeek } from "./send-claim";
 
 // Weekly run: one digest per user, each user isolated (a failure is logged and counted, never fatal).
-// A digest already sent for a week is not sent again, so a re-run or a manual run is safe.
+// Each (user, week) is claimed before sending (send-claim.ts), so a re-run, a manual run, or one that
+// overlaps the cron never sends the same week twice.
 
-export const DIGEST_SENT_ACTION = "digest.sent";
+export { DIGEST_SENT_ACTION };
 const PAGE_SIZE = 100;
-const SENT_SCAN = 10;
 
 export interface DigestRunSummary {
   users: number;
@@ -33,14 +34,18 @@ export function redactSecrets(message: string): string {
 
 const errorMessage = (error: unknown): string => redactSecrets(error instanceof Error ? error.message : String(error));
 
-async function alreadySent(userId: string, weekStart: string): Promise<boolean> {
-  const events = await db.auditEvent.findMany({
-    where: { userId, action: DIGEST_SENT_ACTION },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: SENT_SCAN,
-    select: { payload: true },
-  });
-  return events.some((event) => (event.payload as { weekStart?: unknown } | null)?.weekStart === weekStart);
+/** Send, giving the claim back when the mailer fails so the next run retries this user. */
+async function sendClaimed(userId: string, weekStart: string, built: Extract<BuiltDigest, { status: "ready" }>, deps: Required<SendDigestDeps>): Promise<void> {
+  try {
+    await deps.mailer.send({ userId, to: built.to, message: built.message, unsubscribeUrl: built.links.unsubscribe });
+  } catch (error) {
+    try {
+      await releaseDigestWeek(userId, weekStart, errorMessage(error));
+    } catch (releaseError) {
+      deps.logError(`[digest] could not release the claim for user ${userId}, it won't be retried this week: ${errorMessage(releaseError)}`);
+    }
+    throw error;
+  }
 }
 
 type Outcome = "sent" | "skipped";
@@ -49,15 +54,16 @@ async function sendOne(userId: string, now: Date, deps: Required<SendDigestDeps>
   const built = await deps.build(userId, now, deps.links);
   if (built.status === "skipped") return "skipped";
   const weekStart = built.data.week.start.toISOString();
-  if (await alreadySent(userId, weekStart)) return "skipped";
+  if (!(await claimDigestWeek(userId, weekStart))) return "skipped";
 
-  await deps.mailer.send({ userId, to: built.to, message: built.message, unsubscribeUrl: built.links.unsubscribe });
+  await sendClaimed(userId, weekStart, built, deps);
   try {
     await writeAudit(userId, "inroad", DIGEST_SENT_ACTION, {
       weekStart,
       weekEnd: built.data.week.end.toISOString(),
       submitted: built.data.submitted.total,
       ready: built.data.ready.total,
+      held: built.data.held.total,
       waiting: built.data.waiting.total,
       referralDrafts: built.data.referralDrafts.total,
       campaign: built.data.campaign.kind,

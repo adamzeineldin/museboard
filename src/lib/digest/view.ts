@@ -10,7 +10,7 @@ export interface ViewItem {
 }
 
 export interface ViewSection {
-  id: "went-out" | "ready" | "waiting" | "referrals";
+  id: "went-out" | "ready" | "held" | "waiting" | "referrals";
   heading: string;
   /** Shown above the list (e.g. the "Inroad never sends these" reminder). */
   note: string | null;
@@ -110,6 +110,17 @@ function roleSection(
   };
 }
 
+/** Held rows get their own section, shown only when there are some. */
+function heldSections(held: DigestList<DigestRole>, link: ViewSection["link"]): ViewSection[] {
+  if (held.total === 0) return [];
+  const note =
+    held.total === 1
+      ? "1 application can't go out right now. It says why."
+      : `${held.total} applications can't go out right now. Each one says why.`;
+  const section = roleSection("held", "Not going out right now", held, (r) => `Held: ${cleanText(r.reason)}`, "", link);
+  return [{ ...section, note }];
+}
+
 function referralItem(draft: DigestReferralDraft): ViewItem {
   const target = draft.title ? `${cleanText(draft.company, 80)} · ${cleanText(draft.title, 140)}` : cleanText(draft.company, 80);
   return {
@@ -124,6 +135,11 @@ function subjectFor(data: DigestData): string {
   return `Your Inroad week of ${formatIsoDay(data.week.firstDay)}: ${sent}, ${waiting}`;
 }
 
+function preheaderFor(data: DigestData): string {
+  const held = data.held.total > 0 ? `, ${data.held.total} held` : "";
+  return `${plural(data.submitted.total, "application")} went out, ${data.ready.total} ready to submit, ${data.waiting.total} waiting on you${held}.`;
+}
+
 export function buildDigestView(data: DigestData, links: DigestLinks): DigestView {
   const tz = data.week.timeZone;
   const when = (role: DigestRole, verb: string): string => (role.at ? `${verb} ${formatWeekday(role.at, tz)}` : verb);
@@ -131,6 +147,7 @@ export function buildDigestView(data: DigestData, links: DigestLinks): DigestVie
   const sections: ViewSection[] = [
     roleSection("went-out", "What went out", data.submitted, (r) => when(r, "Submitted"), "Nothing was submitted that week.", activity),
     roleSection("ready", "Ready to submit", data.ready, (r) => cleanText(r.reason), "Nothing is waiting to be submitted.", activity),
+    ...heldSections(data.held, activity),
     roleSection("waiting", "Waiting on you", data.waiting, (r) => cleanText(r.reason), "Nothing needs your decision.", activity),
     {
       id: "referrals",
@@ -145,7 +162,7 @@ export function buildDigestView(data: DigestData, links: DigestLinks): DigestVie
   const range = `${formatIsoDay(data.week.firstDay)} – ${formatIsoDay(data.week.lastDay)}`;
   return {
     subject: subjectFor(data),
-    preheader: `${plural(data.submitted.total, "application")} went out, ${data.ready.total} ready to submit, ${data.waiting.total} waiting on you.`,
+    preheader: preheaderFor(data),
     greeting: data.firstName ? `Hi ${cleanText(data.firstName, 60)},` : "Hi,",
     intro: `Here's your Inroad week, ${range} (${tz} time).`,
     campaign: campaignView(data.campaign, links),

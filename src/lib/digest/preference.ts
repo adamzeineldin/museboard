@@ -25,12 +25,16 @@ export async function setDigestEnabled(userId: string, enabled: boolean): Promis
   const parsed = z.boolean().safeParse(enabled);
   if (!parsed.success) throw new DigestPreferenceError("Choose on or off.");
   const optOut = !parsed.data;
-  const { count } = await db.user.updateMany({ where: { id: userId, digestOptOut: !optOut }, data: { digestOptOut: optOut } });
-  if (count === 0) {
+  // The change and its audit commit together, so a failed audit leaves the setting as it was.
+  const changed = await db.$transaction(async (tx) => {
+    const { count } = await tx.user.updateMany({ where: { id: userId, digestOptOut: !optOut }, data: { digestOptOut: optOut } });
+    if (count > 0) await writeAudit(userId, "user", DIGEST_PREFERENCE_ACTION, { enabled: parsed.data, via: "settings" }, tx);
+    return count > 0;
+  });
+  if (!changed) {
     const user = await db.user.findUnique({ where: { id: userId }, select: { digestOptOut: true } });
     if (!user) throw new DigestPreferenceError("We couldn't find your account.");
     return { enabled: !user.digestOptOut, changed: false };
   }
-  await writeAudit(userId, "user", DIGEST_PREFERENCE_ACTION, { enabled: parsed.data, via: "settings" });
   return { enabled: parsed.data, changed: true };
 }
