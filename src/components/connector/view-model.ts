@@ -1,5 +1,6 @@
 import { formatRelative } from "@/components/shell/format";
 import { SCOPE_LABELS } from "@/lib/connector/constants";
+import type { ConnectorField } from "@/lib/connector/errors";
 import type { ConnectorScope } from "@/lib/types";
 
 // Pure: shapes for the Settings "Connect Muse" section.
@@ -9,12 +10,26 @@ export interface ConnectorActionState {
   message: string;
   /** Present only right after creation: the plaintext token, shown once. */
   created?: { token: string; name: string; scopeLabel: string };
+  /** On an input error: which create-form field it belongs to. */
+  field?: ConnectorField;
   nonce: number;
 }
 
 export const IDLE_CONNECTOR_STATE: ConnectorActionState = { status: "idle", message: "", nonce: 0 };
 
-export const connectorFailure = (message: string): ConnectorActionState => ({ status: "error", message, nonce: Date.now() });
+export const connectorFailure = (message: string, field?: ConnectorField): ConnectorActionState => ({
+  status: "error",
+  message,
+  ...(field ? { field } : {}),
+  nonce: Date.now(),
+});
+
+export type FieldErrorProps = { "aria-invalid"?: true; "aria-describedby"?: string };
+
+/** ARIA for one create-form input: invalid and described by the error only when the error is about that field. */
+export function fieldErrorProps(state: ConnectorActionState, field: ConnectorField, errorId: string): FieldErrorProps {
+  return state.status === "error" && state.field === field ? { "aria-invalid": true, "aria-describedby": errorId } : {};
+}
 export const connectorSuccess = (message: string, created?: ConnectorActionState["created"]): ConnectorActionState => ({
   status: "success",
   message,

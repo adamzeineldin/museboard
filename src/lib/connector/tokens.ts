@@ -5,7 +5,7 @@ import { writeAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { CONNECTOR_SCOPES, connectorScopeSchema, type ConnectorScope } from "@/lib/types";
 import { LAST_USED_RESOLUTION_MS, MAX_ACTIVE_TOKENS, TOKEN_NAME_MAX } from "./constants";
-import { ConnectorError } from "./errors";
+import { ConnectorError, isConnectorField } from "./errors";
 import { generateTokenPlaintext, hashesEqual, hashToken, parseBearerHeader } from "./token-format";
 
 // Muse connector access tokens (docs/MUSE_CONNECTOR_NOTES.md "How Inroad applies this"). One token is bound
@@ -43,7 +43,9 @@ const notFound = (): ConnectorError => new ConnectorError("not_found", "We could
 function parseCreate(name: unknown, scope: unknown): { name: string; scope: ConnectorScope } {
   const parsed = createSchema.safeParse({ name, scope });
   if (!parsed.success) {
-    throw new ConnectorError("invalid_input", parsed.error.issues[0]?.message ?? "Check the connection details.");
+    const issue = parsed.error.issues[0];
+    const field = issue?.path[0];
+    throw new ConnectorError("invalid_input", issue?.message ?? "Check the connection details.", isConnectorField(field) ? field : undefined);
   }
   return parsed.data;
 }
@@ -52,15 +54,17 @@ export async function createConnectorToken(userId: string, name: string, scope: 
   const input = parseCreate(name, scope);
   const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
   if (!user) throw new ConnectorError("not_found", "We couldn't find your account. Sign in again.");
-  const active = await db.connectorToken.count({ where: { userId, revokedAt: null } });
-  if (active >= MAX_ACTIVE_TOKENS) {
-    throw new ConnectorError("limit", `You have ${MAX_ACTIVE_TOKENS} active connections. Revoke one before adding another.`);
-  }
-
   const token = generateTokenPlaintext();
-  const record = await db.connectorToken.create({
-    data: { userId, name: input.name, scope: input.scope, tokenHash: hashToken(token) },
-    select: INFO_SELECT,
+  // Count and insert in one transaction so two concurrent creates (web and CLI, two tabs) can't both pass the cap.
+  const record = await db.$transaction(async (tx) => {
+    const active = await tx.connectorToken.count({ where: { userId, revokedAt: null } });
+    if (active >= MAX_ACTIVE_TOKENS) {
+      throw new ConnectorError("limit", `You have ${MAX_ACTIVE_TOKENS} active connections. Revoke one before adding another.`);
+    }
+    return tx.connectorToken.create({
+      data: { userId, name: input.name, scope: input.scope, tokenHash: hashToken(token) },
+      select: INFO_SELECT,
+    });
   });
   await writeAudit(userId, "user", "connector.token_created", { tokenId: record.id, name: record.name, scope: record.scope });
   return { token, record };

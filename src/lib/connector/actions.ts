@@ -5,7 +5,7 @@ import { z } from "zod";
 import { connectorFailure, connectorSuccess, scopeLabel, type ConnectorActionState } from "@/components/connector/view-model";
 import { getSessionUserId } from "@/lib/current-user";
 import { CONNECTOR_SCOPES } from "@/lib/types";
-import { isConnectorError } from "./errors";
+import { isConnectorError, isConnectorField } from "./errors";
 import { createConnectorToken, revokeToken } from "./tokens";
 
 // Settings → Connect Muse actions. The user always comes from the web session; the form only carries the
@@ -20,7 +20,7 @@ const createSchema = z.object({
 const revokeSchema = z.object({ tokenId: z.string().trim().min(1).max(100) });
 
 function failure(error: unknown, fallback: string, context: Record<string, unknown>): ConnectorActionState {
-  if (isConnectorError(error)) return connectorFailure(error.message);
+  if (isConnectorError(error)) return connectorFailure(error.message, error.field);
   console.error("[settings] connector action failed", { ...context, error: error instanceof Error ? error.message : String(error) });
   return connectorFailure(fallback);
 }
@@ -29,7 +29,11 @@ export async function createConnectorTokenAction(_prev: ConnectorActionState, fo
   const userId = await getSessionUserId();
   if (!userId) return connectorFailure(SIGNED_OUT);
   const parsed = createSchema.safeParse({ name: formData.get("name") ?? "", scope: formData.get("scope") });
-  if (!parsed.success) return connectorFailure(parsed.error.issues[0]?.message ?? "Check the connection details.");
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path[0];
+    return connectorFailure(issue?.message ?? "Check the connection details.", isConnectorField(field) ? field : undefined);
+  }
 
   try {
     const { token, record } = await createConnectorToken(userId, parsed.data.name, parsed.data.scope);

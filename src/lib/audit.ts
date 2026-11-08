@@ -59,16 +59,22 @@ export async function writeAudit(
 
 export interface ListAuditOptions {
   actor?: Actor;
+  /** Only actions starting with this, e.g. "muse." for the MCP tool-call rows. */
+  actionPrefix?: string;
   limit?: number;
 }
 
 const MAX_AUDIT_PAGE = 100;
 
-/** Newest-first audit events for one user, optionally filtered by actor. */
+/** Newest-first audit events for one user, optionally filtered by actor and action prefix. */
 export async function listRecentAudit(userId: string, options: ListAuditOptions = {}): Promise<AuditEvent[]> {
   const take = Math.min(MAX_AUDIT_PAGE, Math.max(1, Math.trunc(options.limit ?? 20)));
   return db.auditEvent.findMany({
-    where: { userId, ...(options.actor ? { actor: options.actor } : {}) },
+    where: {
+      userId,
+      ...(options.actor ? { actor: options.actor } : {}),
+      ...(options.actionPrefix ? { action: { startsWith: options.actionPrefix } } : {}),
+    },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take,
   });

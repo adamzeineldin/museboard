@@ -20,6 +20,18 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
       </div>
     );
   }
+  if (model.kind === "ended") {
+    return (
+      <div className="camp-card">
+        <span className="label">Campaign</span>
+        <b>{model.heading}</b>
+        <span className="muted">{model.endsLabel}</span>
+        <ButtonLink href="/campaign" variant="primary" size="small">
+          Set new dates
+        </ButtonLink>
+      </div>
+    );
+  }
   return (
     <div className="camp-card">
       <span className="label">Campaign</span>

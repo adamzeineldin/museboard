@@ -60,6 +60,13 @@ function ConfirmRevoke({ token, pending, formAction, onCancel }: ConfirmProps) {
 
 export function TokenList({ tokens, revokeAction }: TokenListProps) {
   const [state, formAction, pending] = useActionState(revokeAction, IDLE_CONNECTOR_STATE);
+  // A finished revoke removes the row's Revoke button (the dialog's opener), so move focus to the labelled list
+  // instead of letting it fall to <body>. Focus goes to the list, not the message, so the live region below
+  // announces the result once. This runs after the dialog's own close effect (child effects run first).
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (state.status !== "idle") listRef.current?.focus();
+  }, [state.nonce, state.status]);
   // The dialog belongs to the action result it was opened on: a finished revoke (new nonce) closes it.
   const [opened, setOpened] = useState<{ token: TokenRow; nonce: number } | null>(null);
   const confirming = opened && opened.nonce === state.nonce ? opened.token : null;
@@ -67,9 +74,12 @@ export function TokenList({ tokens, revokeAction }: TokenListProps) {
 
   return (
     <>
-      <ul className="list" aria-label="Muse connections">
+      <ul ref={listRef} className="list" aria-label="Muse connections" tabIndex={-1}>
         {tokens.map((token) => (
           <li key={token.id} className="row">
+            <div className="logo" aria-hidden="true">
+              M
+            </div>
             <div className="min-w-0">
               <div className="t">
                 {token.name} <span className="muted font-medium">· {token.scopeLabel}</span>
@@ -91,13 +101,14 @@ export function TokenList({ tokens, revokeAction }: TokenListProps) {
           </li>
         ))}
       </ul>
+      {/* Keyed by nonce so a repeated identical message is a new node and is announced again. */}
       <div aria-live="polite">
         {state.status === "error" ? (
-          <p className="banner hold" role="alert">
+          <p key={state.nonce} className="banner hold">
             {state.message}
           </p>
         ) : state.status === "success" ? (
-          <p className="banner" role="status">
+          <p key={state.nonce} className="banner">
             {state.message}
           </p>
         ) : null}

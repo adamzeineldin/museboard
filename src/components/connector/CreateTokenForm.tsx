@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui";
 import { SCOPE_LABELS, TOKEN_NAME_MAX } from "@/lib/connector/constants";
 import { CopyField } from "./CopyField";
-import { IDLE_CONNECTOR_STATE, type ConnectorActionState } from "./view-model";
+import { fieldErrorProps, IDLE_CONNECTOR_STATE, type ConnectorActionState } from "./view-model";
 
 export type ConnectorFormAction = (prev: ConnectorActionState, formData: FormData) => Promise<ConnectorActionState>;
 
@@ -17,6 +17,8 @@ const SCOPE_HELP = {
   write:
     "Muse can also draft outreach, propose and approve campaign rules, and prepare and submit applications, each with Muse's own approval prompts.",
 } as const;
+
+const ERROR_ID = "connector-error";
 
 /** Create a connector token. The plaintext token is shown once, right after creation. */
 export function CreateTokenForm({ action }: CreateTokenFormProps) {
@@ -33,7 +35,15 @@ export function CreateTokenForm({ action }: CreateTokenFormProps) {
           <label className="label" htmlFor="connector-name">
             Connection name
           </label>
-          <input id="connector-name" name="name" required maxLength={TOKEN_NAME_MAX} placeholder="Muse on my phone" autoComplete="off" />
+          <input
+            id="connector-name"
+            name="name"
+            required
+            maxLength={TOKEN_NAME_MAX}
+            placeholder="Muse on my phone"
+            autoComplete="off"
+            {...fieldErrorProps(state, "name", ERROR_ID)}
+          />
         </div>
         <fieldset className="field m-0 border-0 p-0">
           <legend className="label mb-2">What Muse can do</legend>
@@ -51,7 +61,7 @@ export function CreateTokenForm({ action }: CreateTokenFormProps) {
         </fieldset>
         <div aria-live="polite">
           {state.status === "error" ? (
-            <p className="banner hold" role="alert">
+            <p id={ERROR_ID} className="banner hold" role="alert">
               {state.message}
             </p>
           ) : null}

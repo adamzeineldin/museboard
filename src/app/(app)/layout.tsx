@@ -22,7 +22,7 @@ export default async function AppLayout({ children }: Readonly<{ children: React
       <main id="main" className="main">
         {children}
       </main>
-      <MusePanel events={shell.museEvents} connected={shell.museConnected} />
+      <MusePanel events={shell.museEvents} connection={shell.museConnection} />
     </div>
   );
 }

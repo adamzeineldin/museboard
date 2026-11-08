@@ -54,6 +54,26 @@ describe("connector tokens", () => {
     await expect(createConnectorToken(user.id, "One more", "read")).rejects.toThrow(/Revoke one/);
   });
 
+  it("keeps the active-token cap when two creates race", async () => {
+    const user = await createTestUser();
+    for (let i = 0; i < MAX_ACTIVE_TOKENS - 1; i += 1) await createConnectorToken(user.id, `Token ${i}`, "read");
+    const results = await Promise.allSettled([
+      createConnectorToken(user.id, "Web", "read"),
+      createConnectorToken(user.id, "CLI", "read"),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(rejected?.reason).toBeInstanceOf(ConnectorError);
+    expect(rejected?.reason).toMatchObject({ code: "limit" });
+    expect(await db.connectorToken.count({ where: { userId: user.id, revokedAt: null } })).toBe(MAX_ACTIVE_TOKENS);
+  });
+
+  it("tags invalid input with the field it belongs to", async () => {
+    const user = await createTestUser();
+    await expect(createConnectorToken(user.id, "   ", "read")).rejects.toMatchObject({ code: "invalid_input", field: "name" });
+    await expect(createConnectorToken(user.id, "Muse", "admin" as never)).rejects.toMatchObject({ code: "invalid_input", field: "scope" });
+  });
+
   it("verifies a bearer header to the owner and scope", async () => {
     const user = await createTestUser();
     const { token, record } = await createConnectorToken(user.id, "Muse", "write");

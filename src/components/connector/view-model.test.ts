@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectorFailure, connectorSuccess, scopeLabel, tokenRows } from "./view-model";
+import { connectorFailure, connectorSuccess, fieldErrorProps, scopeLabel, tokenRows } from "./view-model";
 
 const NOW = new Date("2026-11-07T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
@@ -32,5 +32,15 @@ describe("action states", () => {
     expect(connectorFailure("No")).not.toHaveProperty("created");
     expect(connectorSuccess("Done")).not.toHaveProperty("created");
     expect(connectorSuccess("Done", { token: "inr_x", name: "n", scopeLabel: "Read only" }).created?.token).toBe("inr_x");
+  });
+});
+
+describe("fieldErrorProps", () => {
+  it("marks only the field the error belongs to and points it at the message", () => {
+    const nameError = connectorFailure("Give this connection a name.", "name");
+    expect(fieldErrorProps(nameError, "name", "connector-error")).toEqual({ "aria-invalid": true, "aria-describedby": "connector-error" });
+    expect(fieldErrorProps(nameError, "scope", "connector-error")).toEqual({});
+    expect(fieldErrorProps(connectorFailure("Limit reached"), "name", "connector-error")).toEqual({});
+    expect(fieldErrorProps(connectorSuccess("Done"), "name", "connector-error")).toEqual({});
   });
 });

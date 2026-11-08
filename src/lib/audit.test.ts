@@ -82,6 +82,19 @@ describe("listRecentAudit", () => {
     expect(events.map((e) => e.action)).toEqual(["tool.prepare_application", "tool.find_roles"]);
   });
 
+  it("filters by action prefix", async () => {
+    const user = await createTestUser();
+    await db.auditEvent.createMany({
+      data: [
+        { userId: user.id, actor: "muse", action: "muse.prepare_application", payload: {}, createdAt: new Date("2026-11-01T00:00:00Z") },
+        { userId: user.id, actor: "muse", action: "application.prepared", payload: {}, createdAt: new Date("2026-11-02T00:00:00Z") },
+        { userId: user.id, actor: "muse", action: "muse.find_roles", payload: {}, createdAt: new Date("2026-11-03T00:00:00Z") },
+      ],
+    });
+    const events = await listRecentAudit(user.id, { actor: "muse", actionPrefix: "muse.", limit: 10 });
+    expect(events.map((e) => e.action)).toEqual(["muse.find_roles", "muse.prepare_application"]);
+  });
+
   it("clamps the limit", async () => {
     const user = await createTestUser();
     await db.auditEvent.createMany({
