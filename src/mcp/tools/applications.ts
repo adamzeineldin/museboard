@@ -2,18 +2,22 @@ import "server-only";
 import { z } from "zod";
 import type { Application } from "@/generated/prisma/client";
 import { checkRelease, CONFIRMATION_MAX, getSubmissionPacket, prepareApplication, recordSubmission } from "@/lib/applications";
-import { ApplicationPacketSchema, parseApplicationPacket } from "@/lib/packet-types";
+import { ApplicationPacketSchema } from "@/lib/packet-types";
 import { ToolRefusal } from "../errors";
 import { ApplicationStatusOutput, idSchema, isoString } from "../schemas";
 import { defineTool } from "../tool-kit";
 
 // Application tools: prepare_application (Write), submit_application (Sensitive write), record_submission (Write).
 // Inroad never submits an application itself: Muse's own browser agent fills the form under Muse's controls.
+// prepare_application never returns the packet or apply URL: Muse asks once for a Write tool, so the packet goes out
+// only through submit_application, the Sensitive write Muse confirms on every call (ground rule 2).
 
 const RULE_SUMMARY =
   "the user's approved campaign rules at this moment (campaign active and not ended, company on the auto-apply list, role type, minimum match, weekly limit)";
 
 type ApplicationStatus = z.output<typeof ApplicationStatusOutput>;
+
+const SUBMIT_NEXT_STEP = "To get the packet and application URL, call submit_application with this applicationId.";
 
 const topChoiceOf = (application: Application): boolean =>
   z.object({ topChoice: z.boolean() }).safeParse(application.checkResult).data?.topChoice ?? false;
@@ -21,7 +25,7 @@ const topChoiceOf = (application: Application): boolean =>
 /** The text Muse relays; a skipped row is final, so it must not read as waiting on the user. */
 function prepareSummary(status: ApplicationStatus, ok: boolean, heldReason: string | null, reason: string): string {
   if (heldReason !== null) return `Application is held, nothing is released: ${heldReason}.`;
-  if (ok) return `Application is ${status}: ${reason}.`;
+  if (ok) return `Application is ${status}: ${reason}. ${SUBMIT_NEXT_STEP}`;
   if (status === "skipped") return "The user skipped this application; nothing will be prepared.";
   return `Application is waiting on the user: ${reason}.`;
 }
@@ -33,9 +37,9 @@ export const prepareApplicationTool = defineTool({
   description: [
     "Muse class: Write. Side effect: creates an application record in Inroad for one job (jobId from find_roles) with an audit entry; it does not submit anything.",
     `Runs the rule check against ${RULE_SUMMARY}.`,
-    "If it passes, the application is prepared (cleared to submit) and the packet is returned.",
+    "If it passes, the application is prepared (cleared to submit) and nextStep says to call submit_application, the only tool that returns the packet and application URL.",
     "If not, the application waits for the user to approve or skip it in Inroad, and the reason is returned (for a top-choice company Inroad also drafts a referral ask, never sent).",
-    "Calling it again for the same job returns the existing application, re-checked only while it is waiting (a pass prepares it with the campaign's resume; a new failing reason updates the reason); a prepared application that the rules no longer allow comes back held, without its packet.",
+    "Calling it again for the same job returns the existing application, re-checked only while it is waiting (a pass prepares it with the campaign's resume; a new failing reason updates the reason); a prepared application that the rules no longer allow comes back held.",
     "A posting that has closed is refused with an error.",
   ].join(" "),
   input: z.strictObject({ jobId: idSchema("jobId") }),
@@ -48,13 +52,13 @@ export const prepareApplicationTool = defineTool({
     ok: z.boolean(),
     reason: z.string(),
     topChoice: z.boolean(),
-    packet: ApplicationPacketSchema.nullable(),
+    nextStep: z.string().nullable(),
   }),
   auditArgs: (input) => ({ jobId: input.jobId }),
   async run(ctx, input) {
     const application = await prepareApplication(ctx.userId, input.jobId, "muse", ctx.now());
     const status = ApplicationStatusOutput.parse(application.status);
-    // A prepared row is returned as-is on a repeat call, so re-run the release check: its packet goes out only
+    // A prepared row is returned as-is on a repeat call, so re-run the release check: it reads as cleared only
     // while submit_application would release it right now (same verdict as find_roles' "Held: ..." rows).
     const release = status === "prepared" ? await checkRelease(ctx.userId, application.id, ctx.now()) : null;
     const held = release !== null && !release.allowed;
@@ -69,7 +73,7 @@ export const prepareApplicationTool = defineTool({
         ok,
         reason,
         topChoice: topChoiceOf(application),
-        packet: held ? null : parseApplicationPacket(application.packet),
+        nextStep: ok && status === "prepared" ? SUBMIT_NEXT_STEP : null,
       },
       summary: prepareSummary(status, ok, held ? release.reason : null, application.reason),
     };

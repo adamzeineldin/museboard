@@ -39,8 +39,14 @@ describe("prepare_application summary", () => {
     await skipWaiting(world.user.id, first.data.applicationId as string);
 
     const again = await call(client, "prepare_application", { jobId: JOB_IDS.meta });
-    expect(again).toMatchObject({ isError: false, data: { status: "skipped", ok: false, packet: null } });
+    expect(again).toMatchObject({ isError: false, data: { status: "skipped", ok: false, nextStep: null } });
     expect(again.text).toBe("The user skipped this application; nothing will be prepared.");
+  });
+
+  it("points a cleared application at submit_application for the packet", async () => {
+    const result = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
+    expect(result.data.ok).toBe(true);
+    expect(result.text).toMatch(/call submit_application/);
   });
 
   it("keeps the waiting wording for a waiting application", async () => {

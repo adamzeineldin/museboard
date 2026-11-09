@@ -52,10 +52,15 @@ async function prepare(jobId: string): Promise<string> {
 }
 
 describe("prepare_application", () => {
-  it("prepares a passing job with its packet and audits the rule check", async () => {
+  it("prepares a passing job without releasing its packet, and audits the rule check", async () => {
     const result = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
     expect(result.data).toMatchObject({ jobId: JOB_IDS.stripe, status: "prepared", decidedBy: "campaign", ok: true, reason: RULE_REASONS.fits, topChoice: false });
-    expect(result.data.packet).toMatchObject({ applyUrl: expect.stringContaining("jobs.example.com"), answers: { fullName: "Jordan Lee" } });
+    // Only submit_application (Sensitive write, asked every time) hands out the packet and apply URL.
+    expect(result.data).not.toHaveProperty("packet");
+    expect(result.data.nextStep).toMatch(/submit_application/);
+    expect(JSON.stringify(result)).not.toContain("jobs.example.com");
+    expect(JSON.stringify(result)).not.toContain("Jordan Lee");
+    expect(await db.application.findUniqueOrThrow({ where: { id: result.data.applicationId as string } })).toMatchObject({ packetReleasedAt: null });
 
     const audit = await db.auditEvent.findFirst({ where: { userId: world.user.id, action: "application.prepared" } });
     expect(audit).toMatchObject({ actor: "muse", payload: { applicationId: result.data.applicationId, ok: true, reason: RULE_REASONS.fits } });
@@ -64,7 +69,7 @@ describe("prepare_application", () => {
 
   it("holds a top-choice job as waiting, with no packet, and drafts a referral ask", async () => {
     const result = await call(client, "prepare_application", { jobId: JOB_IDS.meta });
-    expect(result.data).toMatchObject({ status: "waiting", ok: false, reason: RULE_REASONS.topChoice, topChoice: true, packet: null });
+    expect(result.data).toMatchObject({ status: "waiting", ok: false, reason: RULE_REASONS.topChoice, topChoice: true, nextStep: null });
     expect(await db.outreach.findMany({ where: { userId: world.user.id } })).toEqual([
       expect.objectContaining({ kind: "referral_ask", contactId: world.bestContactId, status: "draft" }),
     ]);
@@ -106,20 +111,20 @@ describe("submit_application", () => {
     expect(result).toMatchObject({ isError: true, text: `Inroad won't release this application: ${RULE_REASONS.paused}` });
   });
 
-  it("does not hand out the packet through a repeat prepare_application once the rule check rejects it", async () => {
+  it("never hands out the packet through a repeat prepare_application, held or cleared", async () => {
     const id = await prepare(JOB_IDS.stripe);
     await setCampaignStatus(world.user.id, "paused");
     const again = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
     expect(again).toMatchObject({
       isError: false,
-      data: { applicationId: id, status: "prepared", ok: false, reason: `Held: ${RULE_REASONS.paused}`, packet: null },
+      data: { applicationId: id, status: "prepared", ok: false, reason: `Held: ${RULE_REASONS.paused}`, nextStep: null },
     });
     expect(JSON.stringify(again)).not.toContain("jobs.example.com");
 
     await setCampaignStatus(world.user.id, "active");
     const resumed = await call(client, "prepare_application", { jobId: JOB_IDS.stripe });
-    expect(resumed.data).toMatchObject({ applicationId: id, ok: true, reason: RULE_REASONS.fits });
-    expect(resumed.data.packet).toMatchObject({ applyUrl: expect.stringContaining("jobs.example.com") });
+    expect(resumed.data).toMatchObject({ applicationId: id, ok: true, reason: RULE_REASONS.fits, nextStep: expect.stringMatching(/submit_application/) });
+    expect(JSON.stringify(resumed)).not.toContain("jobs.example.com");
   });
 
   it("refuses a campaign-prepared application over the weekly cap but allows the one the user approved", async () => {
