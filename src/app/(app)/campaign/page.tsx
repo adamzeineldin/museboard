@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { addDaysToIsoDate, localDateString } from "@/lib/rules";
 import { campaignStatusSchema, parseCampaignRules } from "@/lib/types";
 
-export const metadata: Metadata = { title: "Campaign" };
+export const metadata: Metadata = { title: "Rules" };
 
 const DEFAULT_CAMPAIGN_DAYS = 42;
 
@@ -65,8 +65,8 @@ export default async function CampaignPage() {
     <>
       <div className="head">
         <div>
-          <h1>Internship campaign</h1>
-          <p className="muted">Approve these rules once. Inroad applies within them and brings everything else back to you.</p>
+          <h1>Rules</h1>
+          <p className="muted">Approve these once. Muse applies to jobs that pass all of them and brings everything else back to you.</p>
         </div>
       </div>
       <CampaignForm

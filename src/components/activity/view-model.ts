@@ -123,3 +123,12 @@ export function initials(name: string): string {
   const letters = name.trim().split(/\s+/).filter(Boolean).map((word) => word[0]?.toUpperCase() ?? "");
   return letters.join("").slice(0, 2) || "?";
 }
+
+/** The line under the Pipeline title, e.g. "Inroad has sent 4 applications. 2 are waiting on you." */
+export function pipelineSubtitle(stats: Pick<StatsLike, "submitted" | "waiting" | "prepared">): string {
+  const sent = stats.submitted === 0 ? "Nothing has been sent yet." : `${plural(stats.submitted, "application")} sent.`;
+  const open: string[] = [];
+  if (stats.prepared) open.push(`${stats.prepared} ready or held`);
+  if (stats.waiting) open.push(`${stats.waiting} waiting on you`);
+  return open.length ? `${sent} ${open.join(", ")}.` : sent;
+}

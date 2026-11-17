@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import {
   approveApplicationAction,
   markSubmittedAction,
@@ -8,9 +8,10 @@ import {
   skipApplicationAction,
   type ActivityActionResult,
 } from "@/app/(app)/activity/actions";
-import { Button, ButtonLink, EmptyState } from "@/components/ui";
+import { Button, ButtonLink, EmptyState, Pill } from "@/components/ui";
 import { Toast, useToast } from "../campaign/Toast";
 import { ActivityRow } from "./ActivityRow";
+import { boardColumns, defaultFilter, type BoardColumnKey } from "./board";
 import type { ActivityRowModel } from "./rows";
 import { emptyActivityCopy, hiddenHistoryNote, statsModel, type StatsLike } from "./view-model";
 
@@ -25,6 +26,9 @@ export interface ActivityViewProps {
 export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }: ActivityViewProps) {
   const [busy, startTransition] = useTransition();
   const toast = useToast();
+  const columns = boardColumns(rows);
+  // Phones show one column at a time; the pills pick it. Desktop shows the whole board and hides the pills.
+  const [filter, setFilter] = useState<BoardColumnKey>(() => defaultFilter(columns));
 
   const run = (action: () => Promise<ActivityActionResult>) =>
     startTransition(async () => {
@@ -42,7 +46,7 @@ export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }:
         <Button variant="primary" onClick={() => run(runWeeklyPassAction)} disabled={busy || !campaignActive} aria-describedby="pass-hint">
           {busy ? "Working…" : "Run this week's pass"}
         </Button>
-        <span id="pass-hint" className="muted text-[.82rem]">
+        <span id="pass-hint" className="muted text-[13px]">
           {campaignActive
             ? "Checks new matches against your approved rules. Nothing is submitted without a packet check."
             : "Approve or resume a campaign to run a pass."}
@@ -58,10 +62,11 @@ export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }:
       </div>
       {rows.length === 0 ? (
         <EmptyState
+          title="Muse is waiting for matching jobs"
           action={
             campaignActive ? null : (
               <ButtonLink href="/campaign" variant="primary" size="small">
-                Go to campaign
+                Go to rules
               </ButtonLink>
             )
           }
@@ -69,20 +74,43 @@ export function ActivityView({ rows, stats, campaignActive, hiddenHistory = 0 }:
           {emptyActivityCopy(campaignActive)}
         </EmptyState>
       ) : (
-        <ul className="list m-0 list-none p-0" aria-label="Applications">
-          {rows.map((row) => (
-            <ActivityRow
-              key={row.id}
-              row={row}
-              busy={busy}
-              onApprove={(id) => run(() => approveApplicationAction(id))}
-              onSkip={(id) => run(() => skipApplicationAction(id))}
-              onMarkSubmitted={(id) => run(() => markSubmittedAction(id))}
-            />
-          ))}
-        </ul>
+        <>
+          <div className="board-pills" role="group" aria-label="Show column">
+            {columns.map((column) => (
+              <Pill key={column.key} pressed={filter === column.key} onClick={() => setFilter(column.key)}>
+                {column.pill} <span className="mono">{column.rows.length}</span>
+              </Pill>
+            ))}
+          </div>
+          <section className="board" data-filter={filter} aria-label="Applications">
+            {columns.map((column) => (
+              <div key={column.key} className="board-col" data-col={column.key}>
+                <h2 id={`col-${column.key}`}>
+                  {column.title}
+                  <span className="mono">{column.rows.length}</span>
+                </h2>
+                {column.rows.length === 0 ? (
+                  <p className="col-empty">{column.empty}</p>
+                ) : (
+                  <ul aria-labelledby={`col-${column.key}`}>
+                    {column.rows.map((row) => (
+                      <ActivityRow
+                        key={row.id}
+                        row={row}
+                        busy={busy}
+                        onApprove={(id) => run(() => approveApplicationAction(id))}
+                        onSkip={(id) => run(() => skipApplicationAction(id))}
+                        onMarkSubmitted={(id) => run(() => markSubmittedAction(id))}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </section>
+        </>
       )}
-      {hiddenHistory > 0 ? <p className="muted text-[.82rem]">{hiddenHistoryNote(hiddenHistory)}</p> : null}
+      {hiddenHistory > 0 ? <p className="muted text-[13px]">{hiddenHistoryNote(hiddenHistory)}</p> : null}
       <Toast message={toast.message} tone={toast.tone} />
     </>
   );

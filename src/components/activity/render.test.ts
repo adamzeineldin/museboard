@@ -58,7 +58,7 @@ describe("ActivityRow held explanation", () => {
 describe("ActivityRow focus target", () => {
   it("gives the row title a programmatic focus target so focus can return after an action", () => {
     const html = renderRow({ status: "waiting", held: null, recordable: false });
-    expect(html).toMatch(/<div class="t" tabindex="-1"[^>]*>Stripe · SWE Intern<\/div>/);
+    expect(html).toMatch(/<div class="t" tabindex="-1"[^>]*><span class="co">Stripe<\/span><span class="sr-only"> · <\/span><span class="role">SWE Intern<\/span><\/div>/);
   });
 });
 

@@ -43,21 +43,26 @@ export function OnboardingForm({ defaults, useBrowserTimeZone, timeZones, gradYe
   const formKey = state.values ? JSON.stringify(state.values) : "initial";
   return (
     <form key={formKey} ref={formRef} action={action} noValidate>
-      <OnboardingFields
-        values={fieldValues(state, defaults)}
-        errors={state.fieldErrors}
-        timeZones={zones}
-        gradYears={gradYears}
-        timeZoneRef={tzRef}
-      />
+      <div className="form-panel">
+        <OnboardingFields
+          values={fieldValues(state, defaults)}
+          errors={state.fieldErrors}
+          timeZones={zones}
+          gradYears={gradYears}
+          timeZoneRef={tzRef}
+        />
+      </div>
       {state.formError ? (
         <p className="banner hold" role="alert">
           {state.formError}
         </p>
       ) : null}
-      <Button type="submit" variant="primary" disabled={pending}>
-        {pending ? "Saving…" : "Continue"}
-      </Button>
+      <div className="cta-row">
+        <Button type="submit" variant="primary" className="cta" disabled={pending}>
+          {pending ? "Saving…" : "Continue"}
+        </Button>
+        <span className="muted text-[13px]">You can change these anytime in Settings.</span>
+      </div>
     </form>
   );
 }

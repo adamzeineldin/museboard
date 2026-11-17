@@ -51,6 +51,15 @@ async function museTokenCounts(userId: string) {
   return { active, used };
 }
 
+/** The Muse activity log: recent tool calls plus whether Muse is really connected. */
+export async function getMuseActivity(userId: string): Promise<Pick<ShellData, "museEvents" | "museConnection">> {
+  const [events, tokenCounts] = await Promise.all([
+    listRecentAudit(userId, { actor: "muse", actionPrefix: MUSE_TOOL_ACTION_PREFIX, limit: MUSE_EVENT_LIMIT }),
+    museTokenCounts(userId),
+  ]);
+  return { museEvents: events.map(museEventModel), museConnection: museConnectionState(tokenCounts) };
+}
+
 /** Everything the signed-in shell (rail badge, campaign card, Muse panel) needs for one user. */
 export async function getShellData(userId: string, timeZone: string, now: Date = new Date()): Promise<ShellData> {
   const [waitingCount, inForce, events, tokenCounts] = await Promise.all([

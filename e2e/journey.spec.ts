@@ -86,14 +86,14 @@ test("runs the weekly pass on /activity: two cleared, the rest waiting on you", 
   await page.goto("/activity");
   await page.getByRole("button", { name: "Run this week's pass" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Prepared 2. 3 waiting on you." })).toBeAttached();
-  await expect(page.getByRole("list", { name: "Applications" }).getByRole("listitem")).toHaveCount(5);
+  await expect(page.getByRole("region", { name: "Applications" }).getByRole("listitem")).toHaveCount(5);
   await expect(activityRow(page, "Meta")).toContainText("Top choice: referral first");
-  await expect(page.getByRole("list", { name: "Applications" }).getByRole("listitem").filter({ hasText: LIMIT })).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Applications" }).getByRole("listitem").filter({ hasText: LIMIT })).toHaveCount(2);
   await expect(page.getByRole("button", { name: /^Mark as submitted: / })).toHaveCount(2);
 });
 
 test("approve over the cap: one campaign-prepared row is held with 'Weekly limit reached', on web and via Muse", async () => {
-  const rows = page.getByRole("list", { name: "Applications" }).getByRole("listitem");
+  const rows = page.getByRole("region", { name: "Applications" }).getByRole("listitem");
   const overCap = rows.filter({ hasText: LIMIT }).filter({ has: page.getByRole("button", { name: /^Approve / }) });
   const [approveTarget, skipTarget] = await Promise.all([overCap.nth(0).locator(".t").textContent(), overCap.nth(1).locator(".t").textContent()]);
   await page.getByRole("button", { name: `Approve ${approveTarget}` }).click();
@@ -218,7 +218,7 @@ test("settings: a Muse connector token works with an MCP client, and Muse sees t
 
 test("a packet Muse already received stays recordable after the campaign is paused", async () => {
   await page.goto("/activity");
-  const ready = page.getByRole("list", { name: "Applications" }).getByRole("listitem").filter({ has: page.getByText("Ready to submit", { exact: true }) });
+  const ready = page.getByRole("region", { name: "Applications" }).getByRole("listitem").filter({ has: page.getByText("Ready to submit", { exact: true }) });
   await expect(ready).toHaveCount(1);
   const name = (await ready.locator(".t").textContent()) ?? "";
   const company = name.split(" · ")[0];
