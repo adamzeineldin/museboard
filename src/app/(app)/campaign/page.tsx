@@ -2,11 +2,14 @@ import type { Metadata } from "next";
 import { CampaignForm } from "@/components/campaign/CampaignForm";
 import { formatDateTime } from "@/components/campaign/format";
 import { listCompanies } from "@/components/campaign/form-model";
+import { MuseInstructions } from "@/components/campaign/MuseInstructions";
 import { VersionHistory, type VersionHistoryRow } from "@/components/campaign/VersionHistory";
 import { getCampaignHistory, getCampaignState, type VersionHistoryEntry } from "@/lib/campaign";
 import { consentStatus } from "@/lib/campaign/ended";
 import { requireUser } from "@/lib/current-user";
 import { db } from "@/lib/db";
+import { getMuseInstructions } from "@/lib/muse-instructions";
+import { saveMuseInstructionsAction } from "./instructions-actions";
 import { addDaysToIsoDate, localDateString } from "@/lib/rules";
 import { campaignStatusSchema, parseCampaignRules } from "@/lib/types";
 
@@ -43,7 +46,7 @@ function pendingNote(entry: VersionHistoryEntry | undefined, timeZone: string): 
 
 export default async function CampaignPage() {
   const user = await requireUser();
-  const [state, history, resumes, openCompanies] = await Promise.all([
+  const [state, history, resumes, openCompanies, instructions] = await Promise.all([
     getCampaignState(user.id),
     getCampaignHistory(user.id),
     db.resume.findMany({
@@ -52,6 +55,7 @@ export default async function CampaignPage() {
       select: { id: true, filename: true },
     }),
     db.company.findMany({ where: { jobs: { some: { closedAt: null } } }, select: { name: true } }),
+    getMuseInstructions(user.id),
   ]);
 
   const pendingRules = state.pending ? parseCampaignRules(state.pending.rules) : null;
@@ -84,6 +88,7 @@ export default async function CampaignPage() {
         defaults={{ resumeId: resumes[0]?.id ?? "", endsOn: addDaysToIsoDate(today, DEFAULT_CAMPAIGN_DAYS) }}
         minEndsOn={addDaysToIsoDate(today, 1)}
       />
+      <MuseInstructions initial={instructions ?? ""} action={saveMuseInstructionsAction} />
       <VersionHistory rows={history.map((entry) => historyRow(entry, user.timezone))} />
     </>
   );
