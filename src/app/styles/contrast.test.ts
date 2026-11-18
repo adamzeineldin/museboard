@@ -50,6 +50,11 @@ const TEXT_PAIRS: Array<[string, string, string]> = [
   ["fg", "warm-soft", "banner"],
   ["fg", "hold-soft", "hold banner"],
   ["fg", "accent-soft", "auto company toggle"],
+  ["faint", "surface", "pipeline card metadata"],
+  ["body", "surface", "nav items, consent list"],
+  ["body", "bg", "nav items, onboarding lede"],
+  ["accent-ink", "surface", "ready-to-submit stage label"],
+  ["muted", "ok-soft", "company toggle hint (auto)"],
 ];
 
 describe.each([

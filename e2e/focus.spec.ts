@@ -22,8 +22,8 @@ test.afterAll(async () => {
 test("onboarding keeps what you typed after an error and focuses the field to fix", async () => {
   const email = uniqueEmail("focus-onboarding");
   await page.goto("/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await page.getByLabel("Email address").fill(email);
+  await page.getByRole("button", { name: "Continue with email" }).click();
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await page.goto(await readMagicLink(email));
 

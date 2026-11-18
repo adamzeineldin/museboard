@@ -7,8 +7,8 @@ import { expectNoAxeViolations } from "./support/axe";
 
 const PAGES = [
   { path: "/jobs", h1: /open roles?/ },
-  { path: "/campaign", h1: "Internship campaign" },
-  { path: "/activity", h1: "Activity" },
+  { path: "/campaign", h1: "Rules" },
+  { path: "/activity", h1: "Pipeline" },
   { path: "/warm-paths", h1: "Warm paths" },
   { path: "/settings", h1: "Settings" },
 ] as const;

@@ -26,3 +26,10 @@ export const MUSE_CONNECTION_CHIP: Readonly<Record<MuseConnection, { tone: ChipT
   unused: { tone: "neutral", label: "Not used yet", subtitle: "You created a token. Muse hasn't used it yet." },
   none: { tone: "neutral", label: "Not connected", subtitle: DEFAULT_SUBTITLE },
 };
+
+/** The first line of the sidebar status card. */
+export const MUSE_STATUS_LINE: Readonly<Record<MuseConnection, { tone: "live" | "neutral"; label: string }>> = {
+  connected: { tone: "live", label: "Muse connected" },
+  unused: { tone: "neutral", label: "Muse not used yet" },
+  none: { tone: "neutral", label: "Muse not connected" },
+};

@@ -34,6 +34,7 @@ const INSTRUCTIONS = [
   "Each tool description states its Muse class (Read, Write or Sensitive write) and its side effects.",
   "Inroad applies only inside a campaign the user approved; rule changes stay pending until the user approves them.",
   "Inroad drafts outreach but never sends messages, and it never submits applications itself.",
+  "get_campaign also returns any free-form instructions the user wrote for Muse; they sit alongside the approved rules and do not replace them.",
 ].join(" ");
 
 export function toolsForScope(scope: InroadServerOptions["scope"]): readonly InroadTool[] {

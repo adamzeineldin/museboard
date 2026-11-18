@@ -99,8 +99,8 @@ function NumberField({ field, label, min, max, value, error, onChange, onClamp }
 export function RulesFields(props: RulesFieldsProps) {
   const { draft, companies, errors, minEndsOn, onToggleRole, onCycleCompany, onChange, onClamp } = props;
   return (
-    <section className="panel" aria-label="Campaign rules">
-      <fieldset className="field m-0 border-0 p-0" aria-describedby={errors.roles ? "roles-error" : undefined}>
+    <section className="panel rules-panel" aria-label="Campaign rules">
+      <fieldset className="field min-w-0" aria-describedby={errors.roles ? "roles-error" : undefined}>
         <legend className="label mb-2">Role types</legend>
         <div className="opts">
           {ROLE_OPTIONS.map(([role, label]) => (
@@ -112,7 +112,7 @@ export function RulesFields(props: RulesFieldsProps) {
         <FieldError id="roles-error" message={errors.roles} />
       </fieldset>
 
-      <fieldset className="field m-0 border-0 p-0" aria-describedby="companies-hint">
+      <fieldset className="field min-w-0" aria-describedby="companies-hint">
         <legend className="label mb-2">Companies</legend>
         <span id="companies-hint" className="hint">
           Tap to cycle: auto-apply, ask me first, skip.
