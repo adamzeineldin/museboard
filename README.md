@@ -135,6 +135,7 @@ src/app/(app)/       signed-in shell (rail, Muse activity panel) and pages
 src/components/ui/   Button, Chip, Tag, Pill, Panel, MatchRing, EmptyState, ErrorState
 src/components/shell/ nav rail, campaign card, Muse panel, shell data loader
 src/lib/             db, auth, audit, types, profile, and the domain modules (campaign, applications, ...)
+src/mcp/             MCP server for the Muse connector: tools, schemas, HTTP transport, token CLI
 src/proxy.ts         optimistic auth redirect (Next 16 "proxy", formerly middleware)
 src/test/            Vitest global setup and DB helpers
 e2e/                 Playwright specs
