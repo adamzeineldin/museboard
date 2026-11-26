@@ -106,6 +106,7 @@ with mail and resume storage in that dir too; it never touches `dev.db` and make
 | `npm run typecheck` | `prisma generate` then `tsc --noEmit` |
 | `npm test` / `test:coverage` | Vitest, optionally with V8 coverage |
 | `npm run db:push` / `db:seed` | Push the schema to `DATABASE_URL`; idempotent sample data |
+| `npm run db:generate` | Regenerate the Prisma client into `src/generated/prisma` |
 | `npm run worker` / `worker:prod` / `scrape:once` / `digest:once` / `digest:once:prod` | Scheduled worker; one scraper run; one digest run (the `:prod` scripts set `NODE_ENV=production`) |
 | `npm run mcp:token -- <email>` | Mint a Muse connector token for an existing account (printed once) |
 | `npm run e2e` | Playwright journey, axe and auth specs on a throwaway DB |
