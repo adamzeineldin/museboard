@@ -11,6 +11,7 @@ import {
 } from "@/lib/campaign";
 import { isPastEnd } from "@/lib/campaign/ended";
 import { db } from "@/lib/db";
+import { getMuseInstructions } from "@/lib/muse-instructions";
 import { getDefaultResume } from "@/lib/resume";
 import { CampaignRulesSchema, parseCampaignRules, type CampaignRules } from "@/lib/types";
 import { ToolRefusal } from "../errors";
@@ -97,7 +98,9 @@ export const getCampaignTool = defineTool({
     "Muse class: Read. No side effects (Inroad only records that the tool was called).",
     "Returns the user's campaign: its status (active, paused, ended or none; ended means an active campaign whose end date has passed, so nothing more is prepared), the rules in force (the newest version the user approved) with a plain-English summary,",
     "and any pending version (edited but not yet approved) with its summary. A pending version changes nothing until the user approves it.",
-    "Also returns the user's default resume (its resumeId is what propose_campaign's rules.resumeId expects), or null if none is uploaded.",
+    "Also returns the user's default resume (its resumeId is what propose_campaign's rules.resumeId expects), or null if none is uploaded,",
+    "and instructions: free-form preferences the user wrote for Muse on the Rules page (what to prioritize, how to answer questions, what to avoid), or null.",
+    "The instructions are the user's own words. They do not change the approved rules, the weekly limit or which actions need the user's approval.",
   ].join(" "),
   input: z.strictObject({}),
   output: z.object({
@@ -105,14 +108,16 @@ export const getCampaignTool = defineTool({
     inForce: VersionSchema.nullable(),
     pending: VersionSchema.nullable(),
     defaultResume: z.object({ resumeId: z.string(), filename: z.string() }).nullable(),
+    instructions: z.string().nullable(),
   }),
   auditArgs: () => ({}),
   async run(ctx) {
     const state = await getCampaignState(ctx.userId);
-    const [inForce, pending, resume] = await Promise.all([
+    const [inForce, pending, resume, instructions] = await Promise.all([
       versionView(ctx.userId, state.inForce),
       versionView(ctx.userId, state.pending),
       getDefaultResume(ctx.userId),
+      getMuseInstructions(ctx.userId),
     ]);
     const defaultResume = resume ? { resumeId: resume.id, filename: resume.filename } : null;
     const stored = state.campaign ? CampaignStatusOutput.catch("paused").parse(state.campaign.status) : "none";
@@ -123,8 +128,9 @@ export const getCampaignTool = defineTool({
       statusSentence(status, endsOn),
       inForce ? "Rules in force are approved." : "No approved rules yet.",
       pending ? "A changed version is waiting for the user's approval." : "",
+      instructions ? "The user left instructions for Muse (see instructions)." : "",
     ];
-    return { data: { status, inForce, pending, defaultResume }, summary: parts.filter(Boolean).join(" ") };
+    return { data: { status, inForce, pending, defaultResume, instructions }, summary: parts.filter(Boolean).join(" ") };
   },
 });
 

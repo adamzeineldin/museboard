@@ -34,8 +34,8 @@ export const DEFAULT_PROFILE: Profile = { name: "Jordan Lee", school: "State Uni
 /** A brand-new user: request a link, follow it, fill onboarding. Ends on /jobs. */
 export async function signUpAndOnboard(page: Page, email: string, profile: Profile = DEFAULT_PROFILE): Promise<void> {
   await page.goto("/signin");
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await page.getByLabel("Email address").fill(email);
+  await page.getByRole("button", { name: "Continue with email" }).click();
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
 
   await page.goto(await readMagicLink(email));

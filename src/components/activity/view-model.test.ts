@@ -8,6 +8,7 @@ import {
   hiddenHistoryNote,
   initials,
   passToastMessage,
+  pipelineSubtitle,
   statsModel,
 } from "./view-model";
 
@@ -132,5 +133,15 @@ describe("emptyActivityCopy", () => {
 
   it("asks for a campaign first when none is active", () => {
     expect(emptyActivityCopy(false)).toBe("Nothing yet. Approve or resume a campaign to get started.");
+  });
+});
+
+describe("pipelineSubtitle", () => {
+  it("says nothing was sent for a new user", () => {
+    expect(pipelineSubtitle({ submitted: 0, waiting: 0, prepared: 0 })).toBe("Nothing has been sent yet.");
+  });
+
+  it("counts sent, prepared and waiting applications", () => {
+    expect(pipelineSubtitle({ submitted: 1, waiting: 2, prepared: 3 })).toBe("1 application sent. 3 ready or held, 2 waiting on you.");
   });
 });

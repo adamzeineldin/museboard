@@ -1,8 +1,9 @@
 "use client";
 
 import { Button, Chip } from "@/components/ui";
+import { stageFor } from "./board";
 import type { ActivityRowModel } from "./rows";
-import { heldNote, initials } from "./view-model";
+import { heldNote } from "./view-model";
 import { PacketView } from "./PacketView";
 import { heldLabel } from "../release/release-view";
 import { useRestoreFocus } from "./use-restore-focus";
@@ -44,7 +45,6 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
   if (row.status === "prepared") {
     return (
       <>
-        <Chip tone="ok">Ready to submit</Chip>
         {row.jobUrl ? (
           <a className="btn small" href={row.jobUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open application for ${name} (opens in a new tab)`}>
             Open application
@@ -56,8 +56,7 @@ function RowActions({ row, busy, onApprove, onSkip, onMarkSubmitted }: ActivityR
       </>
     );
   }
-  if (row.status === "submitted") return <Chip tone="ok">Applied{row.approvedByYou ? " · approved by you" : ""}</Chip>;
-  return <Chip tone="neutral">Skipped</Chip>;
+  return null;
 }
 
 export function ActivityRow(props: ActivityRowProps) {
@@ -69,41 +68,47 @@ export function ActivityRow(props: ActivityRowProps) {
     handler(id);
   };
   const note = row.status === "prepared" ? heldNote(row) : null;
+  const stage = stageFor(row);
+  const hasActions = row.status === "waiting" || row.status === "prepared";
+  const actions = (
+    <RowActions
+      row={row}
+      busy={busy}
+      onApprove={withFocus(onApprove)}
+      onSkip={withFocus(onSkip)}
+      onMarkSubmitted={withFocus(onMarkSubmitted)}
+    />
+  );
   return (
-    <li className="row">
-      <div className="logo" aria-hidden="true">
-        {initials(row.companyName)}
+    <li className="app-card">
+      <div className="t" tabIndex={-1} ref={titleRef}>
+        <span className="co">{row.companyName}</span>
+        <span className="sr-only"> · </span>
+        <span className="role">{row.title}</span>
       </div>
-      <div className="min-w-0">
-        <div className="t" tabIndex={-1} ref={titleRef}>
-          {row.companyName} · {row.title}
-        </div>
-        <div className="meta">
-          <span>{row.reason}</span>
-          {row.resumeFilename ? <span className="mono">{row.resumeFilename}</span> : null}
-        </div>
+      <div className="meta">
+        {row.reason ? <span>{row.reason}</span> : null}
+        {row.resumeFilename ? <span className="mono">{row.resumeFilename}</span> : null}
       </div>
-      <div className="side flex-wrap">
-        <RowActions
-          row={row}
-          busy={busy}
-          onApprove={withFocus(onApprove)}
-          onSkip={withFocus(onSkip)}
-          onMarkSubmitted={withFocus(onMarkSubmitted)}
-        />
-      </div>
-      <div className="col-span-full flex flex-col gap-2">
-        {note ? <p className="muted text-[.82rem]">{note}</p> : null}
+      <div className="foot">
+        {row.held ? null : (
+          <div className="stage" data-tone={stage.tone}>
+            <span className="dot sm" data-tone={stage.tone} aria-hidden="true" />
+            {stage.label}
+          </div>
+        )}
+        {note ? <p className="note">{note}</p> : null}
+        {hasActions ? <div className="actions">{actions}</div> : null}
         {row.status === "prepared" && !row.held && row.packet ? <PacketView packet={row.packet} /> : null}
-        <details className="text-sm">
-          <summary className="muted cursor-pointer">History ({row.history.length})</summary>
+        <details>
+          <summary>History ({row.history.length})</summary>
           {row.history.length === 0 ? (
             <p className="muted mt-2">No history recorded.</p>
           ) : (
             <ol className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
               {row.history.map((entry) => (
-                <li key={entry.id} className="flex flex-wrap gap-x-2">
-                  <time dateTime={entry.iso} className="muted">
+                <li key={entry.id} className="flex flex-col">
+                  <time dateTime={entry.iso} className="muted mono">
                     {entry.when}
                   </time>
                   <span>{entry.text}</span>

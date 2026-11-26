@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { signIn } from "@/lib/auth";
+import { isOAuthProvider, isProviderConfigured } from "@/lib/auth-providers";
 import { clientIpFrom, magicLinkRequestGuard, warnMagicLinkLimited } from "@/lib/auth-rate-limit";
 import { safeCallbackPath } from "@/lib/protected-routes";
 
@@ -46,4 +47,18 @@ export async function requestMagicLink(_prev: SignInState, formData: FormData): 
     }
     return { error: "Something went wrong. Try again.", email: parsed.data.email };
   }
+}
+
+/**
+ * "Continue with Google / Meta". Auth.js redirects to the provider; a provider without credentials sends the
+ * user back to the sign-in page with an explanation instead of a broken redirect.
+ */
+export async function signInWithProvider(formData: FormData): Promise<void> {
+  const provider = formData.get("provider");
+  const redirectTo = safeCallbackPath(formData.get("callbackUrl")?.toString());
+  if (!isOAuthProvider(provider)) redirect("/signin");
+  if (!isProviderConfigured(provider)) {
+    redirect(`/signin?error=ProviderNotConfigured&provider=${provider}`);
+  }
+  await signIn(provider, { redirectTo });
 }

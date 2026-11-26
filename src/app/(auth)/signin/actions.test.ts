@@ -23,7 +23,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-const { requestMagicLink } = await import("./actions");
+const { requestMagicLink, signInWithProvider } = await import("./actions");
 
 const EMPTY = { error: null, email: "" };
 
@@ -126,5 +126,38 @@ describe("requestMagicLink", () => {
     } finally {
       error.mockRestore();
     }
+  });
+});
+
+describe("signInWithProvider", () => {
+  const providerForm = (provider: string, callbackUrl = "/activity"): FormData => {
+    const data = new FormData();
+    data.append("provider", provider);
+    data.append("callbackUrl", callbackUrl);
+    return data;
+  };
+
+  beforeEach(() => {
+    signIn.mockReset();
+    vi.unstubAllEnvs();
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("starts the provider's sign-in with a safe callback when it is configured", async () => {
+    vi.stubEnv("AUTH_GOOGLE_ID", "id");
+    vi.stubEnv("AUTH_GOOGLE_SECRET", "secret");
+    await signInWithProvider(providerForm("google", "https://evil.example/x"));
+    expect(signIn).toHaveBeenCalledWith("google", { redirectTo: "/jobs" });
+  });
+
+  it("explains instead of redirecting when the provider has no credentials", async () => {
+    vi.stubEnv("AUTH_FACEBOOK_ID", "");
+    await expect(signInWithProvider(providerForm("facebook"))).rejects.toThrow("NEXT_REDIRECT:/signin?error=ProviderNotConfigured&provider=facebook");
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("ignores unknown providers", async () => {
+    await expect(signInWithProvider(providerForm("github"))).rejects.toThrow("NEXT_REDIRECT:/signin");
+    expect(signIn).not.toHaveBeenCalled();
   });
 });

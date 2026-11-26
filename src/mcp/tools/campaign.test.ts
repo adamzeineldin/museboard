@@ -96,4 +96,17 @@ describe("campaign MCP tools", () => {
     expect(ended.text).toContain("Campaign ended on 2026-12-15.");
     expect(ended.text).not.toContain("Campaign is active.");
   });
+
+  it("get_campaign hands Muse the user's free-form instructions, or null when there are none", async () => {
+    const { user } = await setup();
+    const empty = await call(client, "get_campaign");
+    expect(empty.data.instructions).toBeNull();
+    expect(empty.text).not.toContain("left instructions");
+
+    await db.user.update({ where: { id: user.id }, data: { museInstructions: "Prioritize fintech.\nSkip crypto." } });
+    const withText = await call(client, "get_campaign");
+    expect(withText.isError).toBe(false);
+    expect(withText.data.instructions).toBe("Prioritize fintech.\nSkip crypto.");
+    expect(withText.text).toContain("The user left instructions for Muse");
+  });
 });

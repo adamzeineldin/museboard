@@ -15,7 +15,7 @@ export function statusChip(page: Page, company: string): Locator {
 /** An Activity row by company name. */
 export function activityRow(page: Page, company: string): Locator {
   return page
-    .getByRole("list", { name: "Applications" })
+    .getByRole("region", { name: "Applications" })
     .getByRole("listitem")
     .filter({ has: page.locator(".t", { hasText: new RegExp(`^${company} · `) }) });
 }
